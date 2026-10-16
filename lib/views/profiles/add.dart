@@ -6,6 +6,7 @@ import 'package:fl_clash/plugins/app.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/views/profiles/custom/custom.dart';
+import 'package:fl_clash/views/profiles/hongan.dart';
 import 'package:fl_clash/features/form/form.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
@@ -112,6 +113,19 @@ class AddProfileMenu extends ConsumerWidget {
     }
   }
 
+  Future<void> _toHongan(BuildContext context, WidgetRef ref) async {
+    final subscription = await showHonganImportDialog(context: context);
+    if (subscription == null) {
+      return;
+    }
+    unawaited(
+      ref.read(profilesActionProvider.notifier).addProfileFromLink(
+        subscription.subscribeUrl,
+        label: '红岸云',
+      ),
+    );
+  }
+
   void _toAddCustom(BuildContext context, WidgetRef ref) {
     final profileId = ref
         .read(profilesActionProvider.notifier)
@@ -145,6 +159,12 @@ class AddProfileMenu extends ConsumerWidget {
             glyph: AppGlyphs.cloudDownload,
             label: appLocalizations.link,
             onPressed: () => _toAdd(context, ref),
+          ),
+          CommonPopupMenuItem(
+            glyph: AppGlyphs.account,
+            label: '红岸账号导入',
+            subtitle: '登录红岸面板并自动生成配置',
+            onPressed: () => _toHongan(context, ref),
           ),
           if (system.isTV)
             CommonPopupMenuItem(
