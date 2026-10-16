@@ -81,3 +81,10 @@ devtools_options.yaml
 
 # local: extracted from a tarball, symlinked skill dirs are unreadable on Windows
 .claude/skills/
+
+# 红岸账号相关：抓下来的节点/订阅文件含账号凭据（节点密码=账号 uuid、订阅 token），切勿提交
+hongan_nodes.yaml
+hongan_subscription_raw.yaml
+hongan_session.json
+_sub/
+*.session.json
