@@ -6,6 +6,7 @@ import 'package:fl_clash/pages/scan.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
 import 'package:fl_clash/views/profiles/custom/custom.dart';
+import 'package:fl_clash/views/profiles/hongan.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -95,6 +96,19 @@ class AddProfileView extends ConsumerWidget {
     }
   }
 
+  Future<void> _toHongan(WidgetRef ref) async {
+    final subscription = await showHonganImportDialog(context: context);
+    if (subscription == null) {
+      return;
+    }
+    unawaited(
+      ref.read(profilesActionProvider.notifier).addProfileFromLink(
+        subscription.subscribeUrl,
+        label: '红岸云',
+      ),
+    );
+  }
+
   Future<void> _toAddCustom(BuildContext context, WidgetRef ref) async {
     final profilesAction = ref.read(profilesActionProvider.notifier);
     final label = context.appLocalizations.unnamed;
@@ -140,6 +154,12 @@ class AddProfileView extends ConsumerWidget {
           title: Text(appLocalizations.link),
           subtitle: Text(appLocalizations.linkDesc),
           onTap: () => _toAdd(ref),
+        ),
+        ListItem(
+          leading: const GlyphIcon(AppGlyphs.account),
+          title: const Text('红岸账号导入'),
+          subtitle: const Text('登录红岸面板并自动添加订阅'),
+          onTap: () => _toHongan(ref),
         ),
         ListItem(
           leading: const GlyphIcon(AppGlyphs.customize),

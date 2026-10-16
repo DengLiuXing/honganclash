@@ -1,0 +1,436 @@
+diff --git a/lib/common/common.dart b/lib/common/common.dart
+index eae2c6c..3796cfe 100644
+--- a/lib/common/common.dart
++++ b/lib/common/common.dart
+@@ -17,6 +17,7 @@ export 'fixed.dart';
+ export 'font.dart';
+ export 'function.dart';
+ export 'future.dart';
++export 'hongan.dart';
+ export 'http.dart';
+ export 'indexing.dart';
+ export 'input_entries.dart';
+diff --git a/lib/common/hongan.dart b/lib/common/hongan.dart
+new file mode 100644
+index 0000000..ced53c1
+--- /dev/null
++++ b/lib/common/hongan.dart
+@@ -0,0 +1,230 @@
++import 'dart:convert';
++import 'dart:io';
++
++import 'package:dio/dio.dart';
++import 'package:fl_clash/common/request.dart';
++
++/// HongAn (红岸) panel endpoints.
++///
++/// The panel hands the desktop client its own `subscribe_url`, a plain
++/// subscription link carrying the account token. The desktop client sends the
++/// raw JWT as the whole `Authorization` value; a `Bearer` prefix is rejected.
++const honganApiBaseUrl = 'http://hn.luoyaccc.com/api/v1';
++
++const honganUserAgent = 'Dart/3.9 (dart:io)';
++
++class HonganApiException implements Exception {
++  final String message;
++  final int? statusCode;
++
++  const HonganApiException(this.message, {this.statusCode});
++
++  @override
++  String toString() {
++    return statusCode == null ? message : '$message ($statusCode)';
++  }
++}
++
++/// What the panel returns for one successful login.
++class HonganSession {
++  final String email;
++
++  /// Subscription token, already embedded in [HonganSubscription.subscribeUrl].
++  final String subscriptionToken;
++
++  /// Panel bearer, sent as the raw `Authorization` header.
++  final String jwt;
++
++  const HonganSession({
++    required this.email,
++    required this.subscriptionToken,
++    required this.jwt,
++  });
++}
++
++class HonganSubscription {
++  final String subscribeUrl;
++  final int upload;
++  final int download;
++  final int transferEnable;
++  final DateTime? expiredAt;
++  final String? planName;
++  final String? uuid;
++
++  const HonganSubscription({
++    required this.subscribeUrl,
++    this.upload = 0,
++    this.download = 0,
++    this.transferEnable = 0,
++    this.expiredAt,
++    this.planName,
++    this.uuid,
++  });
++
++  int get used => upload + download;
++
++  bool get hasQuota => transferEnable > 0;
++
++  double get usedRatio {
++    if (!hasQuota) {
++      return 0;
++    }
++    return (used / transferEnable).clamp(0.0, 1.0);
++  }
++
++  bool get isExpired {
++    final expiredAt = this.expiredAt;
++    return expiredAt != null && expiredAt.isBefore(DateTime.now());
++  }
++}
++
++class HonganApi {
++  HonganApi._();
++
++  Future<HonganSession> login({
++    required String email,
++    required String password,
++  }) async {
++    final body = await _request(
++      '/passport/auth/login',
++      method: 'POST',
++      body: {'email': email, 'password': password},
++    );
++    final data = _dataOf(body);
++    final subscriptionToken = _stringOf(data['token']);
++    final jwt = _stringOf(data['auth_data']);
++    if (subscriptionToken == null || jwt == null) {
++      throw const HonganApiException('面板未返回登录凭证');
++    }
++    return HonganSession(
++      email: email,
++      subscriptionToken: subscriptionToken,
++      jwt: jwt,
++    );
++  }
++
++  Future<HonganSubscription> subscription(HonganSession session) async {
++    final body = await _request('/user/getSubscribe', jwt: session.jwt);
++    final data = _dataOf(body);
++    final subscribeUrl = _stringOf(data['subscribe_url']);
++    if (subscribeUrl == null) {
++      throw const HonganApiException('面板未返回订阅地址，账号可能已到期');
++    }
++    final plan = data['plan'];
++    return HonganSubscription(
++      subscribeUrl: subscribeUrl,
++      upload: _intOf(data['u']),
++      download: _intOf(data['d']),
++      transferEnable: _intOf(data['transfer_enable']),
++      expiredAt: _dateOf(data['expired_at']),
++      planName: plan is Map ? _stringOf(plan['name']) : null,
++      uuid: _stringOf(data['uuid']),
++    );
++  }
++
++  Future<Map<String, Object?>> _request(
++    String path, {
++    String method = 'GET',
++    Map<String, Object?>? body,
++    String? jwt,
++  }) async {
++    final Response<Object?> response;
++    try {
++      response = await request.dio.request<Object?>(
++        '$honganApiBaseUrl$path',
++        data: body == null ? null : json.encode(body),
++        options: Options(
++          method: method,
++          contentType: body == null ? null : Headers.jsonContentType,
++          responseType: ResponseType.json,
++          validateStatus: (_) => true,
++          headers: {
++            Headers.acceptHeader: Headers.jsonContentType,
++            HttpHeaders.userAgentHeader: honganUserAgent,
++            if (jwt != null) HttpHeaders.authorizationHeader: jwt,
++          },
++        ),
++      );
++    } on DioException catch (error) {
++      throw HonganApiException(_networkMessageOf(error));
++    }
++    final data = response.data;
++    final result = data is Map
++        ? data.map((key, value) => MapEntry('$key', value))
++        : <String, Object?>{};
++    final statusCode = response.statusCode;
++    if (statusCode != null && statusCode >= 200 && statusCode < 300) {
++      return result;
++    }
++    throw HonganApiException(
++      _messageOf(result, statusCode),
++      statusCode: statusCode,
++    );
++  }
++}
++
++final honganApi = HonganApi._();
++
++Map<String, Object?> _dataOf(Map<String, Object?> body) {
++  final data = body['data'];
++  if (data is Map) {
++    return data.map((key, value) => MapEntry('$key', value));
++  }
++  throw const HonganApiException('面板响应缺少 data');
++}
++
++String _messageOf(Map<String, Object?> body, int? statusCode) {
++  final message = _stringOf(body['message']);
++  if (message != null) {
++    return message;
++  }
++  final errors = body['errors'];
++  if (errors is Map && errors.isNotEmpty) {
++    final first = errors.values.first;
++    if (first is List && first.isNotEmpty) {
++      return '${first.first}';
++    }
++  }
++  return '面板返回 HTTP $statusCode';
++}
++
++String _networkMessageOf(DioException error) {
++  return switch (error.type) {
++    DioExceptionType.connectionTimeout ||
++    DioExceptionType.sendTimeout ||
++    DioExceptionType.receiveTimeout => '连接面板超时，请检查网络',
++    DioExceptionType.badCertificate => '面板证书校验失败',
++    DioExceptionType.connectionError => '无法连接面板服务器',
++    _ => '请求失败：${error.message ?? error.type.name}',
++  };
++}
++
++String? _stringOf(Object? value) {
++  if (value is String && value.isNotEmpty) {
++    return value;
++  }
++  return null;
++}
++
++int _intOf(Object? value) {
++  if (value is int) {
++    return value;
++  }
++  if (value is num) {
++    return value.toInt();
++  }
++  if (value is String) {
++    return int.tryParse(value) ?? 0;
++  }
++  return 0;
++}
++
++DateTime? _dateOf(Object? value) {
++  if (value is int && value > 0) {
++    return DateTime.fromMillisecondsSinceEpoch(value * 1000);
++  }
++  if (value is String && value.isNotEmpty) {
++    return DateTime.tryParse(value);
++  }
++  return null;
++}
+diff --git a/lib/views/profiles/add.dart b/lib/views/profiles/add.dart
+index 7331fbe..3fda87c 100644
+--- a/lib/views/profiles/add.dart
++++ b/lib/views/profiles/add.dart
+@@ -6,6 +6,7 @@ import 'package:fl_clash/pages/scan.dart';
+ import 'package:fl_clash/providers/providers.dart';
+ import 'package:fl_clash/state.dart';
+ import 'package:fl_clash/views/profiles/custom/custom.dart';
++import 'package:fl_clash/views/profiles/hongan.dart';
+ import 'package:fl_clash/widgets/widgets.dart';
+ import 'package:material_ui/material_ui.dart';
+ import 'package:flutter_riverpod/flutter_riverpod.dart';
+@@ -95,6 +96,19 @@ class AddProfileView extends ConsumerWidget {
+     }
+   }
+ 
++  Future<void> _toHongan(WidgetRef ref) async {
++    final subscription = await showHonganImportDialog(context: context);
++    if (subscription == null) {
++      return;
++    }
++    unawaited(
++      ref.read(profilesActionProvider.notifier).addProfileFromLink(
++        subscription.subscribeUrl,
++        label: '红岸云',
++      ),
++    );
++  }
++
+   Future<void> _toAddCustom(BuildContext context, WidgetRef ref) async {
+     final profilesAction = ref.read(profilesActionProvider.notifier);
+     final label = context.appLocalizations.unnamed;
+@@ -141,6 +155,12 @@ class AddProfileView extends ConsumerWidget {
+           subtitle: Text(appLocalizations.linkDesc),
+           onTap: () => _toAdd(ref),
+         ),
++        ListItem(
++          leading: const GlyphIcon(AppGlyphs.account),
++          title: const Text('红岸账号导入'),
++          subtitle: const Text('登录红岸面板并自动添加订阅'),
++          onTap: () => _toHongan(ref),
++        ),
+         ListItem(
+           leading: const GlyphIcon(AppGlyphs.customize),
+           title: Text(appLocalizations.customProfile),
+diff --git a/lib/views/profiles/hongan.dart b/lib/views/profiles/hongan.dart
+new file mode 100644
+index 0000000..2664706
+--- /dev/null
++++ b/lib/views/profiles/hongan.dart
+@@ -0,0 +1,137 @@
++import 'dart:async';
++
++import 'package:fl_clash/common/common.dart';
++import 'package:fl_clash/widgets/widgets.dart';
++import 'package:material_ui/material_ui.dart';
++
++/// Signs in to the HongAn (红岸) panel and returns the subscription the panel
++/// issues, or null when the user cancels.
++Future<HonganSubscription?> showHonganImportDialog({BuildContext? context}) {
++  return dialogs.showCommonDialog<HonganSubscription>(
++    context: context,
++    child: const HonganImportDialog(),
++  );
++}
++
++class HonganImportDialog extends StatefulWidget {
++  const HonganImportDialog({super.key});
++
++  @override
++  State<HonganImportDialog> createState() => _HonganImportDialogState();
++}
++
++class _HonganImportDialogState extends State<HonganImportDialog> {
++  final _emailController = TextEditingController();
++  final _passwordController = TextEditingController();
++  final _emailFocusNode = FocusNode();
++  final _passwordFocusNode = FocusNode();
++
++  bool _loading = false;
++  String? _error;
++
++  @override
++  void dispose() {
++    _emailController.dispose();
++    _passwordController.dispose();
++    _emailFocusNode.dispose();
++    _passwordFocusNode.dispose();
++    super.dispose();
++  }
++
++  Future<void> _handleSubmit() async {
++    if (_loading) {
++      return;
++    }
++    final email = _emailController.text.trim();
++    final password = _passwordController.text;
++    if (email.isEmpty || password.isEmpty) {
++      setState(() {
++        _error = '请填写邮箱与密码';
++      });
++      return;
++    }
++    setState(() {
++      _loading = true;
++      _error = null;
++    });
++    try {
++      final session = await honganApi.login(email: email, password: password);
++      final subscription = await honganApi.subscription(session);
++      if (!mounted) {
++        return;
++      }
++      Navigator.of(context).pop(subscription);
++    } on HonganApiException catch (error) {
++      if (!mounted) {
++        return;
++      }
++      setState(() {
++        _loading = false;
++        _error = error.message;
++      });
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final appLocalizations = context.appLocalizations;
++    return CommonDialog(
++      title: '红岸账号导入',
++      actions: [
++        TextButton(
++          onPressed: _loading
++              ? null
++              : () {
++                  Navigator.of(context).pop();
++                },
++          child: Text(appLocalizations.cancel),
++        ),
++        TextButton(
++          onPressed: _loading
++              ? null
++              : () {
++                  unawaited(_handleSubmit());
++                },
++          child: Text(_loading ? '登录中…' : '登录并导入'),
++        ),
++      ],
++      child: Column(
++        mainAxisSize: MainAxisSize.min,
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          Text(
++            '登录红岸面板后自动添加订阅，节点与用量由面板下发。',
++            style: Theme.of(context).textTheme.labelLarge,
++          ),
++          const SizedBox(height: 16),
++          TextField(
++            controller: _emailController,
++            focusNode: _emailFocusNode,
++            keyboardType: TextInputType.emailAddress,
++            textInputAction: TextInputAction.next,
++            onSubmitted: (_) => _passwordFocusNode.requestFocus(),
++            decoration: const InputDecoration(labelText: '邮箱'),
++          ),
++          const SizedBox(height: 8),
++          SecretTextFormField(
++            controller: _passwordController,
++            focusNode: _passwordFocusNode,
++            textInputAction: TextInputAction.done,
++            onFieldSubmitted: (_) {
++              unawaited(_handleSubmit());
++            },
++            decoration: const InputDecoration(labelText: '密码'),
++          ),
++          if (_error != null)
++            Padding(
++              padding: const EdgeInsets.only(top: 12),
++              child: Text(
++                _error!,
++                style: TextStyle(color: Theme.of(context).colorScheme.error),
++              ),
++            ),
++        ],
++      ),
++    );
++  }
++}

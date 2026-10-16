@@ -17,6 +17,7 @@ export 'fixed.dart';
 export 'font.dart';
 export 'function.dart';
 export 'future.dart';
+export 'hongan.dart';
 export 'http.dart';
 export 'indexing.dart';
 export 'input_entries.dart';
