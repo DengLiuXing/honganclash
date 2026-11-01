@@ -97,6 +97,8 @@ dart setup.dart linux
 > 不想在本机装 Flutter / Go / Rust？可以直接在 GitHub Actions 里构建，见
 > [HONGAN_BUILD_LINUX.md](HONGAN_BUILD_LINUX.md) 第 3 节。
 
+> 更新检查已指向本仓库的 release，并且只发布 Linux 产物；仓库还没有 release 时不会提示更新。
+
 ### 用法
 
 启动 FlClash → **订阅** 页 → 右下 `+` → **红岸账号导入** → 填红岸面板的邮箱与密码 → 「登录并导入」→
@@ -121,8 +123,9 @@ dart setup.dart linux
 
 ## 5. 已知限制
 
-1. **本补丁未在 CI 编译过**：生成它的机器上没有任何 Dart/Flutter 工具链，所以 `flutter analyze` / `flutter test`
-   没跑过。每一处 API 都逐条对照过上游源码（包括把 dio 的真实源码下载下来核对请求头常量），但首次编译仍可能报错。
+1. **`flutter analyze` / `flutter test` 还没跑过**：生成补丁的机器上没有 Dart/Flutter 工具链。`Desktop linux`
+   构建已经在 GitHub Actions 通过；`Dart` job 目前卡在 `dart format`，修好格式后才会跑分析/测试。
+   每一处 API 都逐条对照过上游源码（包括把 dio 的真实源码下载下来核对请求头常量），但首次运行仍可能有问题。
 2. **红岸的订阅后端可能不可达**：面板 API 通常是好的，但订阅主机（形如 `http://47.100.65.251:16384/...`）
    在某些网络下 TCP 不通或返回 502，此时导入会在「下载订阅」这一步失败并弹出错误提示（不会崩）。
    兜底办法：直接导入一份已经拿到的 Clash 配置（YAML）即可，FlClash 本身就支持文件导入。
