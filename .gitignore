@@ -86,6 +86,9 @@ devtools_options.yaml
 hongan_nodes.yaml
 hongan_subscription_raw.yaml
 hongan_session.json
+hongan_template.json
+hongan_servers.json
+_sub_state.json
 _sub/
 *.session.json
 
