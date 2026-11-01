@@ -149,10 +149,14 @@ flutter test
 
 ```bash
 python3 tools/hongan_fetch.py --email <你的邮箱> --password '<你的密码>' --out-dir ./out
-python3 tools/hongan_fetch.py --from-client --out-dir ./out            # 免密码：直接读红岸客户端凭据
-python3 tools/hongan_fetch.py --email ... --password ... --verify --out-dir ./out   # 实测 204 才算可用
+python3 tools/hongan_fetch.py --from-client --out-dir ./out            # 免密码：直接读红岸客户端凭据（仅 Windows）
+python3 tools/hongan_fetch.py --email ... --password ... --discover --verify --mihomo /usr/bin/mihomo --out-dir ./out
 python3 tools/hongan_fetch.py --from-file old.yaml --out-dir ./out     # 离线重建（面板格式/完整配置都认）
 ```
+
+**`--discover` 是 Linux 上的关键**：27600–27699 每个端口都作为 anytls 节点交给真 mihomo 做协议层
+握手 + 延迟测试，只有真能出 204 的才保留 —— 不依赖模板、不依赖 Windows 客户端、不依赖订阅后端。
+实测 32 个可用端口，其中 17 个连内置模板里都没有。
 
 > 它的输出含你的**订阅 token 与节点密码**，不要提交到仓库（`.gitignore` 已挡）。
 
