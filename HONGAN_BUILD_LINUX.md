@@ -58,7 +58,40 @@ git clone --depth 1 -b FlClash https://github.com/chen08209/Clash.Meta.git core/
 
 ---
 
-## 3. 构建
+## 3. 在 GitHub 上构建（不用本机工具链）
+
+`.github/workflows/build-linux.yaml` 把同样的 `dart setup.dart linux` 放到 GitHub 托管 runner 上跑：
+Go 内核、Rust Helper、Flutter 编译和 deb / AppImage / rpm 打包都在云端完成，本机只要有浏览器。
+
+1. 把仓库推到 GitHub，确认 `.github/workflows/build-linux.yaml` 和 `core/Clash.Meta` 的子模块指针都在。
+   如果是 fork，先在 **Actions** 页点一次 **I understand my workflows, go ahead and enable them**。
+2. 打开 **Actions → build-linux → Run workflow**：
+   - `targets` 默认 `deb,appimage,rpm`，也可以只选一个；
+   - `app_env` 自用选 `pre` 即可（它只是写进 `env.json` 的 `APP_ENV`）。
+3. 等 20–60 分钟（首次没有缓存时更久）。成功后在该次运行页面底部下载
+   `honganclash-linux-amd64-<env>.zip`。
+4. 解压后直接用：
+
+```bash
+chmod +x FlClash-*.AppImage
+./FlClash-*.AppImage
+
+sudo apt install ./FlClash-*.deb
+sudo rpm -i FlClash-*.rpm
+```
+
+说明与限制：
+
+- runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版；Arm 机器不在这个 workflow 里。
+- 上游的 release job 只在 `chen08209/FlClash` 的 `v*` tag 上发布；本 fork 的 `build-linux` 只把产物存成
+  Actions artifact（保留 14 天），不创建 GitHub Release，也不上传到任何第三方。
+- 构建产物没有签名；deb/rpm 的包名仍是上游的 `FlClash`，会和已安装的 FlClash 冲突，安装前先卸载，或直接用 AppImage。
+- 子模块 `core/Clash.Meta/` 之前没有作为 gitlink 提交，GitHub runner checkout 后会是空目录；本仓库已补上与上游
+  `v0.9.0` 一致的 `8380d0e` 指针。
+
+---
+
+## 4. 构建
 
 ```bash
 flutter pub get
@@ -95,7 +128,7 @@ flutter test
 
 ---
 
-## 4. 使用
+## 5. 使用
 
 1. 启动 FlClash → **订阅（Profiles）** 页 → 右下 `+`；
 2. 选 **红岸账号导入**；
@@ -123,7 +156,7 @@ python3 tools/hongan_fetch.py --from-file old.yaml --out-dir ./out    # 离线�
 
 ---
 
-## 5. 常见故障
+## 6. 常见故障
 
 | 症状 | 原因 | 处理 |
 | --- | --- | --- |
@@ -138,7 +171,7 @@ python3 tools/hongan_fetch.py --from-file old.yaml --out-dir ./out    # 离线�
 
 ---
 
-## 6. 运行期行为提醒
+## 7. 运行期行为提醒
 
 FlClash 是**接管系统**的客户端：它会设置系统代理，开 TUN 时会创建虚拟网卡，可能注册登录启动项，
 并由特权 Helper 管理内核进程。首次在主力机上试跑，建议：
@@ -151,7 +184,7 @@ flutter run -d linux --dart-define=SAFE_MODE=true
 
 ---
 
-## 7. 许可提醒
+## 8. 许可提醒
 
 本仓库整体是 **GPL-3.0**（继承上游 FlClash）。你基于它再分发（包括只发二进制）时，
 需要一并提供对应源码与许可，并保留上游署名。
