@@ -89,3 +89,6 @@ hongan_subscription_raw.yaml
 hongan_session.json
 _sub/
 *.session.json
+
+# hongan_fetch --verify 的临时 mihomo 目录
+.hongan-verify/

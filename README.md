@@ -33,7 +33,7 @@
 | `HONGAN_ARCHITECTURE.md` | **新增** | 逆向分析：红岸 Windows 客户端到底是怎么拿到 Clash 配置的（组件、链路、内核 RPC、加密与内存取证、复现方法） |
 | `HONGAN_BUILD_LINUX.md` | **新增** | Linux 构建 / 子模块坑 / 使用 / 排错 |
 | `patch/hongan-flclash.patch` | **新增** | 上表 1.1 的 `git diff`（13180 B，LF，0 CR） |
-| `tools/hongan_fetch.py` | **新增** | 纯 Python 标准库脚本：不装客户端也能用面板账号换到订阅地址并下载配置 |
+| `tools/hongan_fetch.py` | **新增** | 纯 Python 标准库脚本：面板订阅 / 免密读客户端凭据 / **uuid+模板本地生成** 三级兜底，`--verify` 用 mihomo 实测 |
 | `.gitignore` | 修改 | 追加一栏：**不要把抓下来的节点/订阅文件提交上来**（里面有你的账号凭据） |
 | `.gitmodules` | 修改 | 子模块 `core/Clash.Meta` 的 URL 由 SSH 改成 HTTPS（否则没配 GitHub key 的 Linux 机器拉不动） |
 

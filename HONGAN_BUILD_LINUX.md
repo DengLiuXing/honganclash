@@ -144,12 +144,14 @@ flutter test
 
 ### 另一种取配置的方式（无图形界面）
 
-`tools/hongan_fetch.py` 只用 Python 标准库：登录面板 → 取订阅地址 → 下载配置 → 生成一份可直接用的 YAML。
+`tools/hongan_fetch.py` 只用 Python 标准库，三级兜底：面板订阅 → 订阅地址直取 → **账号 uuid + 内置模板本地生成**
+（最后一级不依赖订阅后端，所以红岸的订阅服务器挂着也能出配置）。加 `--verify` 会用真 mihomo 实测一次。
 
 ```bash
 python3 tools/hongan_fetch.py --email <你的邮箱> --password '<你的密码>' --out-dir ./out
-python3 tools/hongan_fetch.py --jwt '<现成 JWT>' --out-dir ./out
-python3 tools/hongan_fetch.py --from-file old.yaml --out-dir ./out    # 离线重建
+python3 tools/hongan_fetch.py --from-client --out-dir ./out            # 免密码：直接读红岸客户端凭据
+python3 tools/hongan_fetch.py --email ... --password ... --verify --out-dir ./out   # 实测 204 才算可用
+python3 tools/hongan_fetch.py --from-file old.yaml --out-dir ./out     # 离线重建（面板格式/完整配置都认）
 ```
 
 > 它的输出含你的**订阅 token 与节点密码**，不要提交到仓库（`.gitignore` 已挡）。
