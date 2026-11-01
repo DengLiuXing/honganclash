@@ -67,9 +67,9 @@ Go 内核、Rust Helper、Flutter 编译和 deb / AppImage / rpm 打包都在云
    如果是 fork，先在 **Actions** 页点一次 **I understand my workflows, go ahead and enable them**。
 2. 打开 **Actions → build-linux → Run workflow**：
    - `targets` 默认 `deb,appimage,rpm`，也可以只选一个；
-   - `app_env` 自用选 `pre` 即可（它只是写进 `env.json` 的 `APP_ENV`）。
+   - `app_env` 手动构建默认 `pre`；推 `v*` tag 自动构建时固定用 `stable`。
 3. 等 20–60 分钟（首次没有缓存时更久）。成功后在该次运行页面底部下载
-   `honganclash-linux-amd64-<env>.zip`。
+   `honganclash-linux-amd64.zip`。
 4. 解压后直接用：
 
 ```bash
@@ -83,11 +83,31 @@ sudo rpm -i FlClash-*.rpm
 说明与限制：
 
 - runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版；Arm 机器不在这个 workflow 里。
-- 上游的 release job 只在 `chen08209/FlClash` 的 `v*` tag 上发布；本 fork 的 `build-linux` 只把产物存成
-  Actions artifact（保留 14 天），不创建 GitHub Release，也不上传到任何第三方。
+- 推 `v*` tag 时，`build-linux` 会构建并发布一个**只含 Linux 产物**的 GitHub Release
+  （deb / AppImage / rpm + `SHA256SUMS`）；手动 Run workflow 只上传 Actions artifact（保留 14 天），不发 Release。
+  上游的 release job 仍然只在 `chen08209/FlClash` 上跑。
 - 构建产物没有签名；deb/rpm 的包名仍是上游的 `FlClash`，会和已安装的 FlClash 冲突，安装前先卸载，或直接用 AppImage。
 - 子模块 `core/Clash.Meta/` 之前没有作为 gitlink 提交，GitHub runner checkout 后会是空目录；本仓库已补上与上游
   `v0.9.0` 一致的 `8380d0e` 指针。
+
+### 发布 Linux release
+
+App 的更新检查已经指向本仓库（`lib/common/constant.dart` 的 `repository`），所以只有在这里发布 release，
+才会出现更新提示。
+
+```bash
+# 先把版本号从 0.9.0 往上 bump，否则新包自己还会提示“有新版本”
+tool/bump_version.sh all
+
+git commit -am "chore(release): v0.9.1"
+git tag v0.9.1
+git push origin main
+git push origin v0.9.1
+```
+
+- tag 必须是纯 `vX.Y.Z`；`v0.9.1-pre.1` 会被 workflow 拒绝，因为 App 的版本比较不认后缀。
+- tag push 会触发 `build-linux`，成功后创建 release，只带 Linux 的 deb / AppImage / rpm。
+- 仓库没有 release 时，App 的自动检查会静默跳过，不会再提示上游更新。
 
 ---
 
