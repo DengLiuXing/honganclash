@@ -94,6 +94,9 @@ dart setup.dart linux
 > `core/Clash.Meta/` 是子模块，分支是 `FlClash`。若 `git submodule update --init --recursive` 拉不到，用：
 > `git config --global url."https://github.com/".insteadOf "git@github.com:"` 之后再重试。
 
+> 不想在本机装 Flutter / Go / Rust？可以直接在 GitHub Actions 里构建，见
+> [HONGAN_BUILD_LINUX.md](HONGAN_BUILD_LINUX.md) 第 3 节。
+
 ### 用法
 
 启动 FlClash → **订阅** 页 → 右下 `+` → **红岸账号导入** → 填红岸面板的邮箱与密码 → 「登录并导入」→
