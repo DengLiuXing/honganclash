@@ -1,9 +1,6 @@
 name: build-linux
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       targets:
@@ -37,17 +34,8 @@ jobs:
     timeout-minutes: 120
     env:
       TARGETS: ${{ github.event.inputs.targets || 'deb,appimage,rpm' }}
-      APP_ENV: ${{ github.event.inputs.app_env || 'stable' }}
+      APP_ENV: ${{ github.event.inputs.app_env || 'pre' }}
     steps:
-      - name: Validate release tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag $GITHUB_REF_NAME must be vMAJOR.MINOR.PATCH; the app's updater cannot parse a suffix." >&2
-            exit 1
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -109,28 +97,3 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 14
-
-  release:
-    name: Publish Linux release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [ linux ]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: honganclash-linux-amd64
-          path: dist
-
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body: |
-            Linux builds for honganclash: deb, AppImage and rpm.
-            The app checks this repository's latest release for updates.
-          files: dist/*
-          fail_on_unmatched_files: true
