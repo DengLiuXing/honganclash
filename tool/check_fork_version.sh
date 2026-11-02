@@ -12,5 +12,5 @@ case "$tag" in
     ;;
 esac
 
-echo "Tag '$tag' must be $expected or $expected.N (upstream $upstream)" >&2
+echo "Tag '$tag' must be $expected or $expected.0.0.N (upstream $upstream)" >&2
 exit 1

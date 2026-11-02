@@ -15,7 +15,7 @@ usage() {
   cat <<'EOF'
 Usage: tool/release.sh <pre|stable> [options]
 
-  pre                Tag the next vX.Y.Z-honganBeta.N prerelease.
+  pre                Tag the next vX.Y.Z-honganBeta.0.0.N prerelease.
   stable             Write the changelog, commit it, and tag vX.Y.Z-honganBeta.
 
 Options:
@@ -27,7 +27,7 @@ Options:
   -h, --help         Show this help.
 
 Examples:
-  tool/release.sh pre --push          # v0.9.2-honganBeta.1, notes rendered by CI
+  tool/release.sh pre --push          # v0.9.2-honganBeta.0.0.3, notes rendered by CI
   tool/release.sh stable --push       # v0.9.2-honganBeta with a release commit
 EOF
 }
@@ -100,9 +100,11 @@ version="${want_version:-$current}"
 
 base="v$version-honganBeta"
 if [[ "$mode" == "pre" ]]; then
-  last="$(git tag --list "$base.*" |
-    sed -n 's/.*\.\([0-9]*\)$/\1/p' | sort -n | tail -1)"
-  tag="$base.$(((${last:-0}) + 1))"
+  # The beta counter is three-part and only its last number moves, so the first
+  # prerelease of a series is .0.0.2 and the ones after it .0.0.3, .0.0.4, ...
+  last="$(git tag --list "$base.[0-9]*.[0-9]*.[0-9]*" |
+    sed -n 's/.*\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)"
+  tag="$base.0.0.$(((${last:-1}) + 1))"
 else
   git rev-parse -q --verify "refs/tags/$base" >/dev/null &&
     die "$base is already tagged; bump .upstream-version for a new release"
