@@ -207,6 +207,46 @@ class ProfilesAction extends _$ProfilesAction {
     }
   }
 
+  Future<void> addHonganProfile(HonganSubscription subscription) async {
+    _showProfiles();
+    final profile = await globalState.loadingRun(
+      tag: LoadingTag.profiles,
+      () async {
+        if (subscription.jwt.isEmpty) {
+          throw const HonganApiException('登录状态已失效，请重新登录');
+        }
+        final uuid = subscription.uuid;
+        if (uuid == null || uuid.isEmpty) {
+          throw const HonganApiException('面板未返回账号 uuid');
+        }
+        final servers = await honganApi.servers(jwt: subscription.jwt);
+        if (servers.isEmpty) {
+          throw const HonganApiException('面板没有在线节点');
+        }
+        final next = Profile.normal(label: '红岸云').copyWith(
+          autoUpdate: false,
+          subscriptionInfo: SubscriptionInfo(
+            upload: subscription.upload,
+            download: subscription.download,
+            total: subscription.transferEnable,
+            expire:
+                (subscription.expiredAt?.millisecondsSinceEpoch ?? 0) ~/ 1000,
+          ),
+        );
+        return next.saveFile(
+          Uint8List.fromList(
+            utf8.encode(buildHonganConfig(servers: servers, uuid: uuid)),
+          ),
+          validate: (path, key) => _core.validateProfile(path, key),
+        );
+      },
+      title: currentAppLocalizations.addProfile,
+    );
+    if (profile != null) {
+      putProfile(profile);
+    }
+  }
+
   int addCustomProfile(String label) {
     final profile = Profile.custom(label: label);
     putProfile(profile);

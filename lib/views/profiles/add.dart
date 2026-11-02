@@ -119,9 +119,7 @@ class AddProfileMenu extends ConsumerWidget {
       return;
     }
     unawaited(
-      ref
-          .read(profilesActionProvider.notifier)
-          .addProfileFromLink(subscription.subscribeUrl, label: '红岸云'),
+      ref.read(profilesActionProvider.notifier).addHonganProfile(subscription),
     );
   }
 
