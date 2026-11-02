@@ -1,21 +1,35 @@
 diff --git a/lib/common/common.dart b/lib/common/common.dart
-index eae2c6c..3796cfe 100644
+index 1169f6f..e184861 100644
 --- a/lib/common/common.dart
 +++ b/lib/common/common.dart
-@@ -17,6 +17,7 @@ export 'fixed.dart';
- export 'font.dart';
+@@ -14,6 +14,7 @@ export 'file.dart';
+ export 'fixed.dart';
  export 'function.dart';
  export 'future.dart';
 +export 'hongan.dart';
  export 'http.dart';
  export 'indexing.dart';
  export 'input_entries.dart';
+diff --git a/lib/common/constant.dart b/lib/common/constant.dart
+index f5b22e0..8344eb1 100644
+--- a/lib/common/constant.dart
++++ b/lib/common/constant.dart
+@@ -121,7 +121,8 @@ const systemDnsRecordKey = 'system_dns_record';
+ const bootRecordKey = 'boot_record';
+ const appliedConfigMd5Key = 'applied_config_md5';
+ const defaultSystemDnsFallback = '223.5.5.5';
+-const repository = 'chen08209/FlClash';
++const double dialogCommonWidth = 300;
++const repository = 'DengLiuXing/honganclash';
+ const maxMobileWidth = 600;
+ const maxLaptopWidth = 840;
+ const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 diff --git a/lib/common/hongan.dart b/lib/common/hongan.dart
 new file mode 100644
-index 0000000..ced53c1
+index 0000000..bff2aa0
 --- /dev/null
 +++ b/lib/common/hongan.dart
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,432 @@
 +import 'dart:convert';
 +import 'dart:io';
 +
@@ -25,11 +39,19 @@ index 0000000..ced53c1
 +/// HongAn (红岸) panel endpoints.
 +///
 +/// The panel hands the desktop client its own `subscribe_url`, a plain
-+/// subscription link carrying the account token. The desktop client sends the
-+/// raw JWT as the whole `Authorization` value; a `Bearer` prefix is rejected.
++/// subscription link carrying the account token. That link no longer returns a
++/// usable Clash config; the plaintext nodes come from `/user/server/fetch`.
++/// The desktop client sends the raw JWT as the whole `Authorization` value; a
++/// `Bearer` prefix is rejected.
 +const honganApiBaseUrl = 'http://hn.luoyaccc.com/api/v1';
 +
-+const honganUserAgent = 'Dart/3.9 (dart:io)';
++const honganUserAgent = 'Mozilla/5.0 (dart:io) SuperAccelerator';
++
++const honganNodeHost = 'hn.hngggg.top';
++
++const honganNodeSni = 'down.xlkooiss.com';
++
++const honganInfoPort = 27609;
 +
 +class HonganApiException implements Exception {
 +  final String message;
@@ -68,6 +90,7 @@ index 0000000..ced53c1
 +  final DateTime? expiredAt;
 +  final String? planName;
 +  final String? uuid;
++  final String jwt;
 +
 +  const HonganSubscription({
 +    required this.subscribeUrl,
@@ -77,6 +100,7 @@ index 0000000..ced53c1
 +    this.expiredAt,
 +    this.planName,
 +    this.uuid,
++    this.jwt = '',
 +  });
 +
 +  int get used => upload + download;
@@ -128,16 +152,50 @@ index 0000000..ced53c1
 +    if (subscribeUrl == null) {
 +      throw const HonganApiException('面板未返回订阅地址，账号可能已到期');
 +    }
-+    final plan = data['plan'];
++    // Some panel versions keep the quota and uuid only on /user/info.
++    final info = _dataOf(await _request('/user/info', jwt: session.jwt));
++    final upload = _intOf(data['u']);
++    final download = _intOf(data['d']);
++    final transferEnable = _intOf(data['transfer_enable']);
++    final plan = data['plan'] ?? info['plan'];
 +    return HonganSubscription(
 +      subscribeUrl: subscribeUrl,
-+      upload: _intOf(data['u']),
-+      download: _intOf(data['d']),
-+      transferEnable: _intOf(data['transfer_enable']),
-+      expiredAt: _dateOf(data['expired_at']),
++      upload: upload == 0 ? _intOf(info['u']) : upload,
++      download: download == 0 ? _intOf(info['d']) : download,
++      transferEnable: transferEnable == 0
++          ? _intOf(info['transfer_enable'])
++          : transferEnable,
++      expiredAt: _dateOf(data['expired_at']) ?? _dateOf(info['expired_at']),
 +      planName: plan is Map ? _stringOf(plan['name']) : null,
-+      uuid: _stringOf(data['uuid']),
++      uuid: _stringOf(data['uuid']) ?? _stringOf(info['uuid']),
++      jwt: session.jwt,
 +    );
++  }
++
++  /// Panel-maintained plaintext node table; the subscription URL itself now
++  /// returns an encrypted body that a standard Clash client cannot parse.
++  Future<List<HonganServer>> servers({required String jwt}) async {
++    final body = await _request('/user/server/fetch', jwt: jwt);
++    final data = body['data'];
++    final raw = data is List ? data : (data is Map ? data['servers'] : null);
++    if (raw is! List) {
++      throw const HonganApiException('面板未返回节点列表');
++    }
++    final servers = <HonganServer>[];
++    for (final item in raw) {
++      if (item is! Map) {
++        continue;
++      }
++      final json = item.map<String, Object?>(
++        (key, value) => MapEntry('$key', value),
++      );
++      final server = HonganServer.tryParse(json);
++      if (server != null) {
++        servers.add(server);
++      }
++    }
++    servers.sort((a, b) => a.port.compareTo(b.port));
++    return servers;
 +  }
 +
 +  Future<Map<String, Object?>> _request(
@@ -159,7 +217,7 @@ index 0000000..ced53c1
 +          headers: {
 +            Headers.acceptHeader: Headers.jsonContentType,
 +            HttpHeaders.userAgentHeader: honganUserAgent,
-+            if (jwt != null) HttpHeaders.authorizationHeader: jwt,
++            HttpHeaders.authorizationHeader: ?jwt,
 +          },
 +        ),
 +      );
@@ -182,6 +240,164 @@ index 0000000..ced53c1
 +}
 +
 +final honganApi = HonganApi._();
++
++class HonganServer {
++  final String name;
++  final String host;
++  final int port;
++  final String serverName;
++  final bool insecure;
++
++  const HonganServer({
++    required this.name,
++    required this.host,
++    required this.port,
++    required this.serverName,
++    required this.insecure,
++  });
++
++  static HonganServer? tryParse(Map<String, Object?> json) {
++    if ((_stringOf(json['type']) ?? '').toLowerCase() != 'anytls') {
++      return null;
++    }
++    final online = json['is_online'];
++    if (online == false || online == 0 || online == '0') {
++      return null;
++    }
++    final port = _intOf(json['port']);
++    if (port <= 0 || port == honganInfoPort) {
++      return null;
++    }
++    return HonganServer(
++      name: _stringOf(json['name']) ?? '节点$port',
++      host: _stringOf(json['host']) ?? honganNodeHost,
++      port: port,
++      serverName: _stringOf(json['server_name']) ?? honganNodeSni,
++      insecure: json['insecure'] == true || _intOf(json['insecure']) != 0,
++    );
++  }
++}
++
++String buildHonganConfig({
++  required List<HonganServer> servers,
++  required String uuid,
++}) {
++  final names = <String>[];
++  final usedNames = <String>{};
++  for (final server in servers) {
++    var name = server.name;
++    if (!usedNames.add(name)) {
++      name = '${server.name} (${server.port})';
++      var suffix = 2;
++      while (!usedNames.add(name)) {
++        name = '${server.name} (${server.port}-$suffix)';
++        suffix++;
++      }
++    }
++    names.add(name);
++  }
++
++  final buffer = StringBuffer()
++    ..writeln('mixed-port: 7890')
++    ..writeln('allow-lan: false')
++    ..writeln('bind-address: "*"')
++    ..writeln('mode: rule')
++    ..writeln('log-level: info')
++    ..writeln('ipv6: false')
++    ..writeln('unified-delay: true')
++    ..writeln('tcp-concurrent: true')
++    ..writeln('find-process-mode: always')
++    ..writeln('keep-alive-interval: 30')
++    ..writeln('geodata-loader: memconservative')
++    ..writeln('external-controller: 127.0.0.1:9090')
++    ..writeln()
++    ..writeln('dns:')
++    ..writeln('  enable: true')
++    ..writeln('  ipv6: false')
++    ..writeln('  enhanced-mode: fake-ip')
++    ..writeln('  fake-ip-range: 198.18.0.1/16')
++    ..writeln('  fake-ip-filter:')
++    ..writeln('    - "*.lan"')
++    ..writeln('    - localhost.ptlogin2.qq.com')
++    ..writeln('  default-nameserver: [223.5.5.5, 119.29.29.29]')
++    ..writeln(
++      '  nameserver: ["https://doh.pub/dns-query", '
++      '"https://dns.alidns.com/dns-query"]',
++    )
++    ..writeln('  fallback: ["tls://8.8.4.4", "tls://1.1.1.1"]')
++    ..writeln('  proxy-server-nameserver: ["https://doh.pub/dns-query"]')
++    ..writeln(
++      '  fallback-filter: { geoip: true, geoip-code: CN, '
++      'geosite: [gfw], ipcidr: [240.0.0.0/4] }',
++    )
++    ..writeln()
++    ..writeln('proxies:');
++
++  for (var i = 0; i < servers.length; i++) {
++    final server = servers[i];
++    final host = server.host.isEmpty ? honganNodeHost : server.host;
++    final serverName = server.serverName.isEmpty
++        ? honganNodeSni
++        : server.serverName;
++    buffer
++      ..writeln('  - name: ${jsonEncode(names[i])}')
++      ..writeln('    type: anytls')
++      ..writeln('    server: ${jsonEncode(host)}')
++      ..writeln('    port: ${server.port}')
++      ..writeln('    password: ${jsonEncode(uuid)}')
++      ..writeln('    client-fingerprint: chrome')
++      ..writeln('    udp: true')
++      ..writeln('    alpn: [h2, http/1.1]')
++      ..writeln('    sni: ${jsonEncode(serverName)}')
++      ..writeln('    skip-cert-verify: ${server.insecure}');
++  }
++
++  buffer
++    ..writeln()
++    ..writeln('proxy-groups:')
++    ..writeln('  - name: 自动选择')
++    ..writeln('    type: url-test')
++    ..writeln('    url: http://cp.cloudflare.com/generate_204')
++    ..writeln('    interval: 300')
++    ..writeln('    tolerance: 50')
++    ..writeln('    proxies:');
++  for (final name in names) {
++    buffer.writeln('      - ${jsonEncode(name)}');
++  }
++  buffer
++    ..writeln('  - name: 手动选择')
++    ..writeln('    type: select')
++    ..writeln('    proxies:')
++    ..writeln('      - 自动选择');
++  for (final name in names) {
++    buffer.writeln('      - ${jsonEncode(name)}');
++  }
++  buffer
++    ..writeln('      - DIRECT')
++    ..writeln('  - name: 红岸云')
++    ..writeln('    type: select')
++    ..writeln('    proxies:')
++    ..writeln('      - 手动选择')
++    ..writeln('      - 自动选择')
++    ..writeln('      - DIRECT')
++    ..writeln('  - name: 漏网之鱼')
++    ..writeln('    type: select')
++    ..writeln('    proxies:')
++    ..writeln('      - 手动选择')
++    ..writeln('      - DIRECT')
++    ..writeln()
++    ..writeln('rules:')
++    ..writeln('  - DOMAIN-SUFFIX,local,DIRECT')
++    ..writeln('  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve')
++    ..writeln('  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve')
++    ..writeln('  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve')
++    ..writeln('  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve')
++    ..writeln('  - IP-CIDR6,fc00::/7,DIRECT,no-resolve')
++    ..writeln('  - GEOSITE,cn,DIRECT')
++    ..writeln('  - GEOIP,CN,DIRECT')
++    ..writeln('  - MATCH,漏网之鱼');
++  return buffer.toString();
++}
 +
 +Map<String, Object?> _dataOf(Map<String, Object?> body) {
 +  final data = body['data'];
@@ -246,51 +462,99 @@ index 0000000..ced53c1
 +  }
 +  return null;
 +}
-diff --git a/lib/views/profiles/add.dart b/lib/views/profiles/add.dart
-index 7331fbe..3fda87c 100644
---- a/lib/views/profiles/add.dart
-+++ b/lib/views/profiles/add.dart
-@@ -6,6 +6,7 @@ import 'package:fl_clash/pages/scan.dart';
- import 'package:fl_clash/providers/providers.dart';
- import 'package:fl_clash/state.dart';
- import 'package:fl_clash/views/profiles/custom/custom.dart';
-+import 'package:fl_clash/views/profiles/hongan.dart';
- import 'package:fl_clash/widgets/widgets.dart';
- import 'package:material_ui/material_ui.dart';
- import 'package:flutter_riverpod/flutter_riverpod.dart';
-@@ -95,6 +96,19 @@ class AddProfileView extends ConsumerWidget {
+diff --git a/lib/providers/actions/profiles.dart b/lib/providers/actions/profiles.dart
+index 78cdfdf..ece85d2 100644
+--- a/lib/providers/actions/profiles.dart
++++ b/lib/providers/actions/profiles.dart
+@@ -207,6 +207,46 @@ class ProfilesAction extends _$ProfilesAction {
      }
    }
  
-+  Future<void> _toHongan(WidgetRef ref) async {
++  Future<void> addHonganProfile(HonganSubscription subscription) async {
++    _showProfiles();
++    final profile = await globalState.loadingRun(
++      tag: LoadingTag.profiles,
++      () async {
++        if (subscription.jwt.isEmpty) {
++          throw const HonganApiException('登录状态已失效，请重新登录');
++        }
++        final uuid = subscription.uuid;
++        if (uuid == null || uuid.isEmpty) {
++          throw const HonganApiException('面板未返回账号 uuid');
++        }
++        final servers = await honganApi.servers(jwt: subscription.jwt);
++        if (servers.isEmpty) {
++          throw const HonganApiException('面板没有在线节点');
++        }
++        final next = Profile.normal(label: '红岸云').copyWith(
++          autoUpdate: false,
++          subscriptionInfo: SubscriptionInfo(
++            upload: subscription.upload,
++            download: subscription.download,
++            total: subscription.transferEnable,
++            expire:
++                (subscription.expiredAt?.millisecondsSinceEpoch ?? 0) ~/ 1000,
++          ),
++        );
++        return next.saveFile(
++          Uint8List.fromList(
++            utf8.encode(buildHonganConfig(servers: servers, uuid: uuid)),
++          ),
++          validate: (path, key) => _core.validateProfile(path, key),
++        );
++      },
++      title: currentAppLocalizations.addProfile,
++    );
++    if (profile != null) {
++      putProfile(profile);
++    }
++  }
++
+   int addCustomProfile(String label) {
+     final profile = Profile.custom(label: label);
+     putProfile(profile);
+diff --git a/lib/views/profiles/add.dart b/lib/views/profiles/add.dart
+index c72fdb9..5eea74f 100644
+--- a/lib/views/profiles/add.dart
++++ b/lib/views/profiles/add.dart
+@@ -6,6 +6,7 @@ import 'package:fl_clash/plugins/app.dart';
+ import 'package:fl_clash/providers/providers.dart';
+ import 'package:fl_clash/ui/icons/icons.dart';
+ import 'package:fl_clash/views/profiles/custom/custom.dart';
++import 'package:fl_clash/views/profiles/hongan.dart';
+ import 'package:fl_clash/features/form/form.dart';
+ import 'package:fl_clash/widgets/widgets.dart';
+ import 'package:material_ui/material_ui.dart';
+@@ -112,6 +113,16 @@ class AddProfileMenu extends ConsumerWidget {
+     }
+   }
+ 
++  Future<void> _toHongan(BuildContext context, WidgetRef ref) async {
 +    final subscription = await showHonganImportDialog(context: context);
 +    if (subscription == null) {
 +      return;
 +    }
 +    unawaited(
-+      ref.read(profilesActionProvider.notifier).addProfileFromLink(
-+        subscription.subscribeUrl,
-+        label: '红岸云',
-+      ),
++      ref.read(profilesActionProvider.notifier).addHonganProfile(subscription),
 +    );
 +  }
 +
-   Future<void> _toAddCustom(BuildContext context, WidgetRef ref) async {
-     final profilesAction = ref.read(profilesActionProvider.notifier);
-     final label = context.appLocalizations.unnamed;
-@@ -141,6 +155,12 @@ class AddProfileView extends ConsumerWidget {
-           subtitle: Text(appLocalizations.linkDesc),
-           onTap: () => _toAdd(ref),
-         ),
-+        ListItem(
-+          leading: const GlyphIcon(AppGlyphs.account),
-+          title: const Text('红岸账号导入'),
-+          subtitle: const Text('登录红岸面板并自动添加订阅'),
-+          onTap: () => _toHongan(ref),
-+        ),
-         ListItem(
-           leading: const GlyphIcon(AppGlyphs.customize),
-           title: Text(appLocalizations.customProfile),
+   void _toAddCustom(BuildContext context, WidgetRef ref) {
+     final profileId = ref
+         .read(profilesActionProvider.notifier)
+@@ -146,6 +157,12 @@ class AddProfileMenu extends ConsumerWidget {
+             label: appLocalizations.link,
+             onPressed: () => _toAdd(context, ref),
+           ),
++          CommonPopupMenuItem(
++            glyph: AppGlyphs.account,
++            label: '红岸账号导入',
++            subtitle: '登录红岸面板并自动生成配置',
++            onPressed: () => _toHongan(context, ref),
++          ),
+           if (system.isTV)
+             CommonPopupMenuItem(
+               glyph: AppGlyphs.devices,
 diff --git a/lib/views/profiles/hongan.dart b/lib/views/profiles/hongan.dart
 new file mode 100644
 index 0000000..2664706
@@ -434,3 +698,145 @@ index 0000000..2664706
 +    );
 +  }
 +}
+diff --git a/lib/views/profiles/profiles.dart b/lib/views/profiles/profiles.dart
+index 7d4c0ca..f33ff08 100644
+--- a/lib/views/profiles/profiles.dart
++++ b/lib/views/profiles/profiles.dart
+@@ -322,8 +322,7 @@ class ProfileItem extends ConsumerWidget {
+     );
+   }
+ 
+-  SubscriptionInfo? get _subscriptionInfo =>
+-      profile.type == ProfileType.url ? profile.subscriptionInfo : null;
++  SubscriptionInfo? get _subscriptionInfo => profile.subscriptionInfo;
+ 
+   String _subtitle(BuildContext context) {
+     final info = _subscriptionInfo;
+diff --git a/test/common/hongan_test.dart b/test/common/hongan_test.dart
+new file mode 100644
+index 0000000..baaf3e7
+--- /dev/null
++++ b/test/common/hongan_test.dart
+@@ -0,0 +1,95 @@
++import 'package:fl_clash/common/hongan.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++void main() {
++  group('HonganServer.tryParse', () {
++    test('keeps an online anytls node', () {
++      final server = HonganServer.tryParse(<String, Object?>{
++        'name': '香港1',
++        'type': 'anytls',
++        'host': 'hn.hngggg.top',
++        'port': 27611,
++        'server_name': 'down.xlkooiss.com',
++        'insecure': 1,
++        'is_online': 1,
++      });
++
++      expect(server, isNotNull);
++      expect(server!.name, '香港1');
++      expect(server.host, 'hn.hngggg.top');
++      expect(server.port, 27611);
++      expect(server.serverName, 'down.xlkooiss.com');
++      expect(server.insecure, isTrue);
++    });
++
++    test('falls back to the shared node host and SNI', () {
++      final server = HonganServer.tryParse(<String, Object?>{
++        'type': 'anytls',
++        'port': 27612,
++        'is_online': 1,
++      });
++
++      expect(server, isNotNull);
++      expect(server!.name, '节点27612');
++      expect(server.host, honganNodeHost);
++      expect(server.serverName, honganNodeSni);
++      expect(server.insecure, isFalse);
++    });
++
++    test('drops offline, info and non-anytls rows', () {
++      expect(
++        HonganServer.tryParse(<String, Object?>{
++          'type': 'anytls',
++          'port': 27611,
++          'is_online': 0,
++        }),
++        isNull,
++      );
++      expect(
++        HonganServer.tryParse(<String, Object?>{
++          'type': 'anytls',
++          'port': honganInfoPort,
++          'is_online': 1,
++        }),
++        isNull,
++      );
++      expect(
++        HonganServer.tryParse(<String, Object?>{
++          'type': 'trojan',
++          'port': 27611,
++          'is_online': 1,
++        }),
++        isNull,
++      );
++    });
++  });
++
++  test('buildHonganConfig writes nodes, groups and rules', () {
++    final config = buildHonganConfig(
++      servers: const [
++        HonganServer(
++          name: '香港1',
++          host: 'hn.hngggg.top',
++          port: 27611,
++          serverName: 'down.xlkooiss.com',
++          insecure: false,
++        ),
++        HonganServer(
++          name: '香港1',
++          host: 'hn.hngggg.top',
++          port: 27612,
++          serverName: 'down.xlkooiss.com',
++          insecure: true,
++        ),
++      ],
++      uuid: 'uuid-1',
++    );
++
++    expect(config, contains('  - name: "香港1"'));
++    expect(config, contains('  - name: "香港1 (27612)"'));
++    expect(config, contains('password: "uuid-1"'));
++    expect(config, contains('skip-cert-verify: true'));
++    expect(config, contains('  - name: 自动选择'));
++    expect(config, contains('MATCH,漏网之鱼'));
++  });
++}
+diff --git a/test/widgets/profile_focus_test.dart b/test/widgets/profile_focus_test.dart
+index 7946458..6fd41ea 100644
+--- a/test/widgets/profile_focus_test.dart
++++ b/test/widgets/profile_focus_test.dart
+@@ -171,6 +171,22 @@ void main() {
+     );
+   });
+ 
++  testWidgets('a file profile with subscription info shows its traffic', (
++    tester,
++  ) async {
++    final file = Profile.normal(label: 'file').copyWith(
++      subscriptionInfo: const SubscriptionInfo(
++        upload: 1024,
++        download: 2048,
++        total: 4096,
++        expire: 1234567890,
++      ),
++    );
++    await pumpProfiles(tester, profiles: [file]);
++
++    expect(find.text('3KB / 4KB'), findsOneWidget);
++  });
++
+   testWidgets('a card without traffic names its source under the title and '
+       'has no subscription info button', (tester) async {
+     final l = currentAppLocalizations;

@@ -91,7 +91,7 @@ sudo rpm -i FlClash-*.rpm
 - `build-linux` 的 runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版。
 - 构建产物没有签名；deb/rpm 的包名仍是上游的 `FlClash`，会和已安装的 FlClash 冲突，安装前先卸载，或直接用 AppImage。
 - 子模块 `core/Clash.Meta/` 之前没有作为 gitlink 提交，GitHub runner checkout 后会是空目录；本仓库已补上与上游
-  `v0.9.0` 一致的 `8380d0e` 指针。
+  `v0.9.2` 一致的 `c506292` 指针。
 
 ### 发布桌面 release（Linux / Windows / macOS）
 
@@ -99,15 +99,15 @@ App 的更新检查已经指向本仓库（`lib/common/constant.dart` 的 `repos
 才会出现更新提示。
 
 ```bash
-# 先把版本号从 0.9.0 往上 bump，否则新包自己还会提示“有新版本”
+# 先把版本号从 0.9.2 往上 bump，否则新包自己还会提示“有新版本”
 tool/bump_version.sh all
 
 # 只提交版本号，避免把工作区里未完成的改动一起带进 release
 git add pubspec.yaml
-git commit -m "chore(release): v0.9.1"
-git tag v0.9.1
+git commit -m "chore(release): v0.9.3"
+git tag v0.9.3
 git push origin main
-git push origin v0.9.1
+git push origin v0.9.3
 ```
 
 - tag 必须是纯 `vX.Y.Z`；`v0.9.1-pre.1` 不会创建 release，因为 App 的版本比较不认后缀。
@@ -157,7 +157,7 @@ flutter test
 > 所有用到的 API 都逐条对照过上游源码，包括把 dio 的真实源码下载下来逐个核对请求头常量
 > （结论：`Headers.acceptHeader` / `Headers.jsonContentType` 存在，而 `Headers.userAgentHeader` /
 > `Headers.authorizationHeader` **不存在**，所以那两个头用的是 `dart:io` 的 `HttpHeaders.*`，与
-> `lib/common/request.dart` 的写法一致）。首次 `flutter analyze` 若报错，按报错改即可，改动面很小。
+> `lib/common/request.dart` 的写法一致）。上游 v0.9.2 快照下 `flutter analyze --no-fatal-infos` 已通过。
 
 ---
 
@@ -166,7 +166,8 @@ flutter test
 1. 启动 FlClash → **订阅（Profiles）** 页 → 右下 `+`；
 2. 选 **红岸账号导入**；
 3. 填红岸面板的**邮箱 + 密码** → 「登录并导入」；
-4. 成功后订阅列表出现 `红岸云`，节点/分组/规则/流量都来自面板，并按面板设置自动更新（红岸默认 24 小时）。
+4. 成功后配置列表出现 `红岸云` file profile，节点/分组/规则由面板明文节点表在本地生成，卡片显示登录时的已用/总量。
+   file profile 不会自动更新；重新登录一次即可刷新。
 
 之后就是普通 FlClash 用法：选节点、切模式（规则/全局/直连）、开系统代理或 TUN。
 
@@ -177,8 +178,9 @@ flutter test
 
 ### 另一种取配置的方式（无图形界面）
 
-`tools/hongan_fetch.py` 只用 Python 标准库，三级兜底：面板订阅 → 订阅地址直取 → **账号 uuid + 内置模板本地生成**
-（最后一级不依赖订阅后端，所以红岸的订阅服务器挂着也能出配置）。加 `--verify` 会用真 mihomo 实测一次。
+`tools/hongan_fetch.py` 只用 Python 标准库：优先 `/user/server/fetch` 明文节点表 → 订阅接口仅确认存活
+→ **账号 uuid + 内置模板本地生成**（最后一级不依赖订阅后端，所以红岸的订阅服务器挂着也能出配置）。
+加 `--discover` 会用真 mihomo 逐端口实测 anytls，`--verify` 会实测整份配置。
 
 ```bash
 python3 tools/hongan_fetch.py --email <你的邮箱> --password '<你的密码>' --out-dir ./out

@@ -4,13 +4,17 @@
 > 目的是搞清楚「它怎么拿到 Clash 配置」，从而能在别的平台上复现同一套流程。
 > **不含**任何红岸服务端代码、密钥或证书；文中出现的地址、字段名都来自客户端自身的字符串与网络行为。
 
+> **2026-11-02 更正**：红岸订阅接口现在只认官方 UA，返回的是加密 base64，不再直接返回标准 YAML。
+> 当前补丁改走 `/api/v1/user/server/fetch` 的明文节点表，在本地生成配置。下文关于 Windows 客户端组件、
+> 内存取证与 JSON-RPC 的观察保留作历史对照；订阅链路以 [README 第 2 节](README.md#2-它是怎么工作的) 为准。
+
 ---
 
 ## 1. 结论（一句话）
 
-客户端**先登录红岸面板拿账号专属的订阅地址，再 HTTP GET 那个地址拿到标准 Clash / mihomo YAML**；
-YAML 在磁盘上是**加密**的，明文只在内存里短暂存在；随后它把配置通过本地 socket 上的 **JSON-RPC** 交给一个
-**mihomo（Clash.Meta）内核**去跑。
+客户端先登录红岸面板拿账号专属的订阅地址；订阅接口现在返回**红岸加密的 base64**（且有 UA 白名单），
+明文节点表在 `/api/v1/user/server/fetch`。客户端把明文/解密后的配置通过本地 socket 上的 **JSON-RPC**
+交给一个 **mihomo（Clash.Meta）内核**去跑。
 
 ---
 
@@ -54,7 +58,7 @@ YAML 在磁盘上是**加密**的，明文只在内存里短暂存在；随后�
 ```
 POST http://hn.luoyaccc.com/api/v1/passport/auth/login
 Content-Type: application/json
-User-Agent: Dart/3.9 (dart:io)
+User-Agent: Mozilla/5.0 (dart:io) SuperAccelerator  # 当前补丁的面板 API UA
 {"email":"<你的邮箱>","password":"<你的密码>"}
 
 200 → {"data":{"token":"<订阅 token>","is_admin":0,"auth_data":"<JWT>"}}
@@ -82,7 +86,7 @@ Authorization: <裸 JWT>            ← 加 "Bearer " 会 403
 
 ```
 GET <subscribe_url>
-→ 标准 Clash / mihomo YAML（port / anytls 节点 / proxy-groups / rules / dns …）
+→ 红岸加密的 base64（订阅接口只用于确认存活；节点明文改走 /user/server/fetch）
 → 响应头 subscription-userinfo 被解析成流量信息
 ```
 
@@ -144,7 +148,7 @@ GET <subscribe_url>
 ## 5. 为什么这能迁移到别的平台
 
 - 面板交互只有两个 HTTP 请求（登录、取订阅），与平台无关；
-- 订阅是标准 mihomo YAML，任何 Clash/Meta 客户端都能吃；
+- 节点明文来自 `/user/server/fetch`，可生成标准 mihomo YAML；订阅接口本身返回加密数据；
 - 内核本身就是 mihomo 的 fork —— 上游 FlClash 用的是同一族的 `chen08209/Clash.Meta`（分支 `FlClash`），
   所以「不换内核、只补登录逻辑」就能在 Linux/macOS 上得到等价体验。
 
