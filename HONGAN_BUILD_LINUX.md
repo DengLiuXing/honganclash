@@ -60,14 +60,20 @@ git clone --depth 1 -b FlClash https://github.com/chen08209/Clash.Meta.git core/
 
 ## 3. 在 GitHub 上构建（不用本机工具链）
 
-`.github/workflows/build-linux.yaml` 把同样的 `dart setup.dart linux` 放到 GitHub 托管 runner 上跑：
-Go 内核、Rust Helper、Flutter 编译和 deb / AppImage / rpm 打包都在云端完成，本机只要有浏览器。
+仓库里有两个 workflow：
 
-1. 把仓库推到 GitHub，确认 `.github/workflows/build-linux.yaml` 和 `core/Clash.Meta` 的子模块指针都在。
-   如果是 fork，先在 **Actions** 页点一次 **I understand my workflows, go ahead and enable them**。
+- `.github/workflows/build.yaml`：推 `v*` tag 时构建 **Linux / Windows / macOS** 桌面安装包并发布 GitHub Release；
+  同一 workflow 的 `desktop` job 还会在每次 push 时做各平台的 debug 编译检查。
+- `.github/workflows/build-linux.yaml`：只手动构建 Linux 包，产物作为 Actions artifact，不发 Release。
+
+两个 workflow 都会在云端编译 Go 内核、Rust Helper 和 Flutter，本机只要有浏览器。
+
+### 手动构建 Linux 包
+
+1. 把仓库推到 GitHub，确认 `core/Clash.Meta` 的子模块指针在；如果是 fork，先在 **Actions** 页启用 workflow。
 2. 打开 **Actions → build-linux → Run workflow**：
    - `targets` 默认 `deb,appimage,rpm`，也可以只选一个；
-   - `app_env` 手动构建默认 `pre`；推 `v*` tag 自动构建时固定用 `stable`。
+   - `app_env` 手动构建默认 `pre`。
 3. 等 20–60 分钟（首次没有缓存时更久）。成功后在该次运行页面底部下载
    `honganclash-linux-amd64.zip`。
 4. 解压后直接用：
@@ -82,15 +88,12 @@ sudo rpm -i FlClash-*.rpm
 
 说明与限制：
 
-- runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版；Arm 机器不在这个 workflow 里。
-- 推 `v*` tag 时，`build-linux` 会构建并发布一个**只含 Linux 产物**的 GitHub Release
-  （deb / AppImage / rpm + `SHA256SUMS`）；手动 Run workflow 只上传 Actions artifact（保留 14 天），不发 Release。
-  上游的 release job 仍然只在 `chen08209/FlClash` 上跑。
+- `build-linux` 的 runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版。
 - 构建产物没有签名；deb/rpm 的包名仍是上游的 `FlClash`，会和已安装的 FlClash 冲突，安装前先卸载，或直接用 AppImage。
 - 子模块 `core/Clash.Meta/` 之前没有作为 gitlink 提交，GitHub runner checkout 后会是空目录；本仓库已补上与上游
   `v0.9.0` 一致的 `8380d0e` 指针。
 
-### 发布 Linux release
+### 发布桌面 release（Linux / Windows / macOS）
 
 App 的更新检查已经指向本仓库（`lib/common/constant.dart` 的 `repository`），所以只有在这里发布 release，
 才会出现更新提示。
@@ -99,14 +102,24 @@ App 的更新检查已经指向本仓库（`lib/common/constant.dart` 的 `repos
 # 先把版本号从 0.9.0 往上 bump，否则新包自己还会提示“有新版本”
 tool/bump_version.sh all
 
-git commit -am "chore(release): v0.9.1"
+# 只提交版本号，避免把工作区里未完成的改动一起带进 release
+git add pubspec.yaml
+git commit -m "chore(release): v0.9.1"
 git tag v0.9.1
 git push origin main
 git push origin v0.9.1
 ```
 
-- tag 必须是纯 `vX.Y.Z`；`v0.9.1-pre.1` 会被 workflow 拒绝，因为 App 的版本比较不认后缀。
-- tag push 会触发 `build-linux`，成功后创建 release，只带 Linux 的 deb / AppImage / rpm。
+- tag 必须是纯 `vX.Y.Z`；`v0.9.1-pre.1` 不会创建 release，因为 App 的版本比较不认后缀。
+- tag push 会触发 `build.yaml`，构建并发布：
+  - Linux amd64：deb / AppImage / rpm
+  - Windows amd64：exe / zip
+  - macOS arm64 + amd64：dmg
+- 所有产物和 `SHA256SUMS` 会放进同一个 GitHub Release。
+- **Android 暂不包含**：发布 APK 需要 `KEYSTORE` / `SERVICE_JSON` / 签名密码等 secrets，当前仓库没有配置。
+  Android 的单元测试和 debug 编译检查仍然保留在 `build.yaml` 里。
+- `build.yaml` 的 release job 不依赖 Dart/Go/Rust 检查 job，所以某个检查失败不会挡住安装包发布；
+  检查结果仍然会单独显示。
 - 仓库没有 release 时，App 的自动检查会静默跳过，不会再提示上游更新。
 
 ---
