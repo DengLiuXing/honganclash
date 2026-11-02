@@ -400,7 +400,8 @@ jobs:
           version="$(sed -n 's/^version: //p' pubspec.yaml)"
           base="${version%%-*}"
           build="${version##*+}"
-          sed -i "s/^version: .*/version: ${base}+${build}/" pubspec.yaml
+          sed "s/^version: .*/version: ${base}+${build}/" pubspec.yaml > pubspec.yaml.tmp
+          mv pubspec.yaml.tmp pubspec.yaml
           grep '^version:' pubspec.yaml
 
       - name: Setup
