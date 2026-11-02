@@ -112,8 +112,25 @@ tool/release.sh pre --push
   - Linux amd64：deb / AppImage / rpm
   - Windows amd64：exe / zip
   - macOS arm64 + amd64：dmg
+  - Android arm64：apk（release 签名，见下）
 - 所有产物和 `SHA256SUMS` 会放进同一个 GitHub Release。
-- **Android 暂不包含**：发布 APK 需要 `android/app/keystore.jks` 和签名密码；当前 release 保持桌面三平台。
+- APK 构建失败不会挡住桌面安装包的发布：`upload` 只要求 `build` 成功。
+
+### 安卓签名（一次性配置）
+
+`android/app/build.gradle.kts` 把密钥库路径写死成 `android/app/keystore.jks`，密码从
+`android/local.properties` 的 `storePassword` / `keyAlias` / `keyPassword` 读。三样缺一样就退回 debug 签名，
+包名也变成 `com.follow.clash.dev`——能装，但和正式包互不覆盖，而且每次构建的 debug 密钥都不同。
+
+```bash
+keytool -genkeypair -v -keystore android/app/keystore.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias flclash
+base64 -w0 android/app/keystore.jks      # 这个输出就是 ANDROID_KEYSTORE_BASE64
+```
+
+`Settings → Secrets and variables → Actions` 里加四个 secret：`ANDROID_KEYSTORE_BASE64`、
+`ANDROID_STORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。`keystore.jks` 和 `local.properties`
+都在 `.gitignore` 里；密钥文件丢了就没法再发覆盖升级的包，务必离线备份。
   Android 的单元测试和 debug 编译检查仍然保留在 `build.yaml` 里。
 - `build.yaml` 的 release job 不依赖 Dart/Go/Rust 检查 job，所以某个检查失败不会挡住安装包发布；
   检查结果仍然会单独显示。

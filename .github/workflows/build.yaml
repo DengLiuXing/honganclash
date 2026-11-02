@@ -414,10 +414,110 @@ jobs:
           path: ./dist
           overwrite: true
 
+  android-apk:
+    name: Android APK
+    if: github.repository == 'DengLiuXing/honganclash' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          link-to-sdk: true
+
+      # android/app/build.gradle.kts reads the key material at configure time, so
+      # both files have to exist before the first Gradle invocation setup.dart makes.
+      - name: Write signing config
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "The ANDROID_* repository secrets are incomplete ($name is empty)." >&2
+              exit 1
+            fi
+          done
+          echo "$KEYSTORE" | base64 -d > android/app/keystore.jks
+          {
+            echo "flutter.sdk=$FLUTTER_ROOT"
+            echo "sdk.dir=$ANDROID_HOME"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/local.properties
+
+      - name: Validate fork version
+        shell: bash
+        run: bash tool/check_fork_version.sh "${GITHUB_REF_NAME}"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # One ABI keeps the gomobile Core, the Cargo crate and the R8 pass to a
+      # single run; add arm/x86_64 here only if those devices matter.
+      - name: Build APK
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: dart setup.dart android --arch arm64 ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
+
+      # A build that lost the release signing config still produces an APK; it
+      # just carries the .dev applicationId, so the package name is the check.
+      - name: Check the artifacts
+        run: |
+          ls -lh dist
+          apk="$(find dist -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$apk" || { echo 'No APK in dist/' >&2; exit 1; }
+          aapt2="$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort -V | tail -1)"
+          "$aapt2" dump badging "$apk" | head -2
+          "$aapt2" dump badging "$apk" | grep -q "package: name='com.follow.clash'" ||
+            { echo "Not signed with the release key: $apk" >&2; exit 1; }
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-android
+          path: ./dist
+          overwrite: true
+
   upload:
     permissions:
       contents: write
-    needs: [ build ]
+    needs: [ build, android-apk ]
+    # A failed APK must not hold back the desktop installers that are ready to
+    # publish; the failed run already shows up on its own.
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download
@@ -443,4 +543,4 @@ jobs:
             honganclash ${{ github.ref_name }}
 
             Desktop builds: Linux, Windows and macOS.
-            Android is not included in this desktop release.
+            Android: arm64 APK, signed with the fork's release key.

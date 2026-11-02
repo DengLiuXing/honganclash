@@ -1,0 +1,146 @@
+name: build-android
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: APK architecture
+        type: choice
+        options:
+          - arm64
+          - arm
+          - amd64
+          - all
+        default: arm64
+      app_env:
+        description: APP_ENV used by setup.dart
+        type: choice
+        options:
+          - pre
+          - stable
+        default: pre
+      release_tag:
+        description: Existing release tag to attach the APK to (empty keeps it an artifact)
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.47.6'
+  GO_VERSION: '1.27.1'
+  NDK_VERSION: r28c
+  ARCH: ${{ github.event.inputs.arch || 'arm64' }}
+  APP_ENV: ${{ github.event.inputs.app_env || 'pre' }}
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          link-to-sdk: true
+
+      # android/app/build.gradle.kts reads the key material at configure time, so
+      # both files have to exist before the first Gradle invocation setup.dart makes.
+      - name: Write signing config
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "The ANDROID_* repository secrets are incomplete ($name is empty)." >&2
+              exit 1
+            fi
+          done
+          echo "$KEYSTORE" | base64 -d > android/app/keystore.jks
+          {
+            echo "flutter.sdk=$FLUTTER_ROOT"
+            echo "sdk.dir=$ANDROID_HOME"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/local.properties
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          args=()
+          if [ "$ARCH" != all ]; then
+            args+=(--arch "$ARCH")
+          fi
+          dart setup.dart android "${args[@]}" --env "$APP_ENV" -v
+
+      # A build that lost the release signing config still produces an APK; it
+      # just carries the .dev applicationId, so the package name is the check.
+      - name: Check the artifacts
+        run: |
+          mapfile -t apks < <(find dist -name '*.apk' -type f | sort)
+          ((${#apks[@]})) || { echo 'No APK in dist/' >&2; exit 1; }
+          aapt2="$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort -V | tail -1)"
+          for apk in "${apks[@]}"; do
+            ls -lh "$apk"
+            "$aapt2" dump badging "$apk" | sed -n '1,2p'
+            "$aapt2" dump badging "$apk" | grep -q "package: name='com.follow.clash'" ||
+              { echo "Not signed with the release key: $apk" >&2; exit 1; }
+          done
+          cp "${apks[@]}" ./
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: honganclash-android-${{ env.ARCH }}
+          path: ./*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      # Uploading creates nothing: the tag has to exist already, so this cannot
+      # trigger the release workflow by accident.
+      - name: Attach to the release
+        if: github.event.inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.release_tag }}
+        run: |
+          gh release view "$TAG" >/dev/null ||
+            { echo "No release $TAG; push the tag with build.yaml first or leave this empty." >&2; exit 1; }
+          gh release upload "$TAG" ./*.apk --clobber

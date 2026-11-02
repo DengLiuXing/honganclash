@@ -361,8 +361,10 @@ and the gomobile AAR built for one ABI), `rust` (both crates), and a
 Windows runner for the helper's `windows-service` feature. On branch pushes a
 `desktop` job also compiles a debug build per desktop platform; a tag skips it,
 since its release matrix compiles the same native code. Release builds run only
-in the public repository and start alongside the checks; `upload` publishes
-only once every build and every check job passes.
+in the public repository and start alongside the checks: the `build` matrix plus
+an `android-apk` job that signs one arm64 APK from the four `ANDROID_*` secrets.
+`upload` waits for `build` alone, so a failed APK leaves the desktop installers
+publishing; it runs only once `build` succeeds.
 
 `bash tool/check_plugins.sh` is that plugin gate, and CI runs the same script.
 It discovers every `plugins/*/pubspec.yaml`, analyzes each package, and runs
