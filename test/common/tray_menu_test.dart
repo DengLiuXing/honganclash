@@ -17,9 +17,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:riverpod/riverpod.dart';
 import 'package:tray/tray.dart';
+
+import '../helpers/app_paths.dart';
 
 const _channel = MethodChannel('tray');
 
@@ -41,27 +42,13 @@ HotKeyAction _bind(HotAction action, PhysicalKeyboardKey key) {
   );
 }
 
-class _FakePathProvider extends PathProviderPlatform {
-  _FakePathProvider(this.root);
-
-  final String root;
-
-  @override
-  Future<String?> getTemporaryPath() async => root;
-
-  @override
-  Future<String?> getApplicationSupportPath() async => root;
-
-  @override
-  Future<String?> getApplicationCachePath() async => root;
-}
-
 TrayState _trayState({
   bool isStart = false,
   bool tunEnable = false,
   bool systemProxy = false,
   bool autoLaunch = false,
   bool showTrayTitle = false,
+  bool monochromeTrayIcon = true,
   bool safeMode = false,
   Mode mode = Mode.rule,
   List<Group> groups = const [],
@@ -77,6 +64,7 @@ TrayState _trayState({
     groups: groups,
     selectedMap: const {},
     showTrayTitle: showTrayTitle,
+    monochromeTrayIcon: monochromeTrayIcon,
     safeMode: safeMode,
     hotKeys: hotKeys,
   );
@@ -106,7 +94,7 @@ void main() {
 
   setUpAll(() async {
     root = Directory.systemTemp.createTempSync('tray_menu_test');
-    PathProviderPlatform.instance = _FakePathProvider(root.path);
+    await useAppPaths(root);
     await AppLocalizations.load(const Locale('en'));
   });
 
@@ -250,6 +238,27 @@ void main() {
     expect(reps.map((rep) => rep['scale']), containsAll([1.0, 2.0, 3.0, 4.0]));
     expect(reps.map((rep) => rep['bytes']), everyElement(isNotEmpty));
     expect((arguments['icon'] as Map)['isTemplate'], isTrue);
+  });
+
+  test('ships the color status icon once monochrome is off', () async {
+    await update(
+      _trayState(isStart: true, tunEnable: true, monochromeTrayIcon: false),
+    );
+
+    final arguments = showCall()!.arguments as Map;
+    expect((arguments['icon'] as Map)['isTemplate'], isFalse);
+    final reps = ((arguments['icon'] as Map)['reps'] as List).cast<Map>();
+    final base = reps.firstWhere((rep) => rep['scale'] == 1.0);
+    expect(
+      base['bytes'],
+      base64Encode(
+        File('assets/images/tray/unix/status_3.png').readAsBytesSync(),
+      ),
+    );
+    expect(
+      _item(showCall(), currentAppLocalizations.monochromeIcon)['checked'],
+      isFalse,
+    );
   });
 
   test('skips the platform call when the tray state is unchanged', () async {
@@ -404,6 +413,10 @@ void main() {
       expect(
         _labels(showCall()),
         isNot(contains(currentAppLocalizations.speedStatistics)),
+      );
+      expect(
+        _labels(showCall()),
+        isNot(contains(currentAppLocalizations.monochromeIcon)),
       );
       expect(_labels(showCall()), isNot(contains(HotAction.delayTest.label)));
     });

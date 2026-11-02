@@ -1,7 +1,7 @@
 import 'package:fl_clash/enum/enum.dart';
-import 'package:fl_clash/icons/icons.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/views/dashboard/widgets/core_status_button.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
@@ -25,7 +25,6 @@ void main() {
           container: container,
           child: TestApp(
             includeNavigatorKey: false,
-            setTheme: false,
             homeBuilder: (child) => Scaffold(body: Center(child: child)),
             child: const CoreStatusButton(),
           ),
@@ -73,7 +72,6 @@ void main() {
           container: container,
           child: TestApp(
             includeNavigatorKey: false,
-            setTheme: false,
             homeBuilder: (child) => Scaffold(body: Center(child: child)),
             child: const CoreStatusButton(),
           ),
@@ -101,6 +99,47 @@ void main() {
     },
   );
 
+  testWidgets('labels the status on desktop and keeps it an icon on mobile', (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    globalState.container = container;
+    container.read(coreStatusProvider.notifier).value = CoreStatus.disconnected;
+
+    Future<void> pumpAt(Size size) async {
+      container.read(viewSizeProvider.notifier).value = size;
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: TestApp(
+            includeNavigatorKey: false,
+            homeBuilder: (child) => Scaffold(body: Center(child: child)),
+            child: const CoreStatusButton(),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    await pumpAt(const Size(1200, 800));
+    expect(find.text('Disconnected'), findsOneWidget);
+    expect(find.byGlyph(AppGlyphs.refresh), findsOneWidget);
+
+    await pumpAt(const Size(400, 800));
+    expect(find.text('Disconnected'), findsNothing);
+    expect(find.byType(IconButton), findsOneWidget);
+    expect(find.byGlyph(AppGlyphs.refresh), findsOneWidget);
+    expect(find.byTooltip('Core status'), findsOneWidget);
+
+    container.read(coreStatusProvider.notifier).value = CoreStatus.connecting;
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Connecting…'), findsNothing);
+    expect(find.byType(IconButton), findsOneWidget);
+    expect(find.byType(CommonCircleLoading), findsOneWidget);
+  });
+
   testWidgets('does not clip a connecting state longer than the hold', (
     tester,
   ) async {
@@ -114,7 +153,6 @@ void main() {
         container: container,
         child: TestApp(
           includeNavigatorKey: false,
-          setTheme: false,
           homeBuilder: (child) => Scaffold(body: Center(child: child)),
           child: const CoreStatusButton(),
         ),
@@ -150,7 +188,6 @@ void main() {
         container: container,
         child: TestApp(
           includeNavigatorKey: false,
-          setTheme: false,
           homeBuilder: (child) => Scaffold(body: Center(child: child)),
           child: const CoreStatusButton(),
         ),

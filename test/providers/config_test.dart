@@ -22,7 +22,7 @@ void main() {
       expect(value.onlyStatisticsProxy, false);
       expect(value.autoLaunch, false);
       expect(value.closeConnections, true);
-      expect(value.tabAnimation, TabAnimation.slide);
+      expect(value.tabAnimation, TabAnimation.fade);
     });
 
     test('can update state', () {
@@ -167,7 +167,7 @@ void main() {
   group('ProxiesStyleSetting provider', () {
     test('default values', () {
       final value = container.read(proxiesStyleSettingProvider);
-      expect(value.type, ProxiesType.tab);
+      expect(value.type, ProxiesType.list);
     });
 
     test('can update state', () {

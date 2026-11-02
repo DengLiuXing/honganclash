@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:animations/animations.dart';
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/models/models.dart';
@@ -11,22 +10,34 @@ import 'package:url_launcher/url_launcher.dart';
 class Dialogs {
   Dialogs._();
 
-  BuildContext get _context => rootNavigatorKey.currentContext!;
+  // Focus sits in the route the user acts in, so an alert raised from a form
+  // sheet, or a page pushed inside one, opens over it, beside the navigation
+  // as the sheet sits.
+  BuildContext get _context {
+    var context = FocusManager.instance.primaryFocus?.context;
+    while (context != null) {
+      final route = ModalRoute.of(context);
+      if (route is AlertHostRoute) {
+        final host = route.navigator;
+        if (host != null && host.mounted) {
+          return host.context;
+        }
+        break;
+      }
+      context = route?.navigator?.context;
+    }
+    return rootNavigatorKey.currentContext!;
+  }
 
   Future<T?> showCommonDialog<T>({
     required Widget child,
     BuildContext? context,
     bool? dismissible,
   }) async {
-    final host = context ?? _context;
-    return showModal<T>(
-      useRootNavigator: false,
-      context: host,
-      configuration: FadeScaleTransitionConfiguration(
-        barrierColor: host.colorScheme.modalScrim,
-        barrierDismissible: dismissible ?? true,
-      ),
-      builder: (_) => child,
+    return showFloatingDialog<T>(
+      context: context ?? _context,
+      child: child,
+      dismissible: dismissible ?? true,
     );
   }
 
@@ -36,8 +47,53 @@ class Dialogs {
     String? title,
     String? confirmText,
     String? cancelText,
-    bool cancelable = true,
     bool? dismissible,
+    bool destructive = false,
+  }) {
+    return _showMessage(
+      message: message,
+      context: context,
+      title: title,
+      confirmText: confirmText,
+      cancelText: cancelText,
+      dismissible: dismissible,
+      destructive: destructive,
+      cancelable: true,
+    );
+  }
+
+  /// Asked on leaving with unsaved changes: true saves, false leaves without
+  /// saving, and null, the alert dismissed, stays.
+  Future<bool?> showSaveChanges({String? title}) {
+    return showMessage(
+      title: title,
+      message: TextSpan(text: currentAppLocalizations.saveChanges),
+    );
+  }
+
+  /// A message with nothing to decide, acknowledged with a single button.
+  Future<void> showAlert({
+    required InlineSpan message,
+    String? title,
+    bool? dismissible,
+  }) {
+    return _showMessage(
+      message: message,
+      title: title,
+      dismissible: dismissible,
+      cancelable: false,
+    );
+  }
+
+  Future<bool?> _showMessage({
+    required InlineSpan message,
+    required bool cancelable,
+    BuildContext? context,
+    String? title,
+    String? confirmText,
+    String? cancelText,
+    bool? dismissible,
+    bool destructive = false,
   }) async {
     return showCommonDialog<bool>(
       context: context,
@@ -47,6 +103,7 @@ class Dialogs {
           final appLocalizations = context.appLocalizations;
           return CommonDialog(
             title: title ?? appLocalizations.tip,
+            destructive: destructive,
             actions: [
               if (cancelable)
                 TextButton(
@@ -62,18 +119,9 @@ class Dialogs {
                 child: Text(confirmText ?? appLocalizations.confirm),
               ),
             ],
-            child: Container(
-              width: 300,
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                child: SelectableText.rich(
-                  TextSpan(
-                    style: Theme.of(context).textTheme.labelLarge,
-                    children: [message],
-                  ),
-                  style: const TextStyle(overflow: TextOverflow.visible),
-                ),
-              ),
+            child: SelectableText.rich(
+              TextSpan(children: [message]),
+              style: const TextStyle(overflow: TextOverflow.visible),
             ),
           );
         },
@@ -85,6 +133,40 @@ class Dialogs {
     return showSheet(
       context: _context,
       builder: (_) => _FailureDetailsSheet(failures: failures),
+    );
+  }
+
+  Future<void> showQrCode({
+    required String title,
+    required String data,
+    String? message,
+  }) {
+    return showCommonDialog<void>(
+      child: Builder(
+        builder: (context) => CommonDialog(
+          title: title,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(context.appLocalizations.close),
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 16,
+            children: [
+              if (QrCodeView.fits(data)) ...[
+                QrCodeView(data: data),
+                if (message != null) Text(message, textAlign: TextAlign.center),
+              ] else
+                Text(
+                  context.appLocalizations.qrcodeTooLongTip,
+                  textAlign: TextAlign.center,
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -131,49 +213,6 @@ class Dialogs {
         validator: (value) => value == null || value.trim().isEmpty
             ? appLocalizations.emptyTip(appLocalizations.ageSecretKey)
             : null,
-      ),
-    );
-  }
-
-  Future<NamedUrl?> showNamedUrlInput({
-    required String title,
-    String label = '',
-    String url = '',
-    FormFieldValidator<String>? labelValidator,
-    FormFieldValidator<String>? urlValidator,
-  }) async {
-    final res = await showCommonDialog<List<NamedUrl>>(
-      child: NamedUrlDialog(
-        title: title,
-        label: label,
-        url: url,
-        labelValidator: labelValidator,
-        urlValidator: urlValidator,
-      ),
-    );
-    return res?.single;
-  }
-
-  /// A batch skips the urls in [existingUrls].
-  Future<List<NamedUrl>?> showNamedUrlsInput({
-    required String title,
-    String? urlLabel,
-    String? batchTip,
-    FormFieldValidator<String>? labelValidator,
-    FormFieldValidator<String>? urlValidator,
-    Set<String> existingUrls = const {},
-    bool withAgeSecretKey = false,
-  }) {
-    return showCommonDialog<List<NamedUrl>>(
-      child: NamedUrlDialog(
-        title: title,
-        urlLabel: urlLabel,
-        batchTip: batchTip,
-        labelValidator: labelValidator,
-        urlValidator: urlValidator,
-        batch: true,
-        existingUrls: existingUrls,
-        withAgeSecretKey: withAgeSecretKey,
       ),
     );
   }
@@ -242,15 +281,15 @@ class _FailureDetailsSheet extends StatelessWidget {
     return CommonScaffold(
       title: context.appLocalizations.errorDetails,
       body: SelectionArea(
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 16,
-          ).copyWith(top: context.contentTopPadding, bottom: 20),
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16).copyWith(
+            top: context.sectionsTopPadding,
+            bottom: 20 + context.bottomInset,
+          ),
           itemCount: groups.length,
-          separatorBuilder: (_, _) => SizedBox(height: 24.mAp),
           itemBuilder: (_, index) {
             final MapEntry(key: message, value: labels) = groups[index];
-            return generateSectionV3(
+            return generateSection(
               items: [
                 for (final label in labels)
                   DecorationListItem(

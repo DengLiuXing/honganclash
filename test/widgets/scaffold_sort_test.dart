@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:fl_clash/icons/icons.dart';
-import 'package:fl_clash/models/models.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
@@ -52,14 +51,14 @@ Finder _inBar(Finder finder) =>
 void _expectIdle(WidgetTester tester) {
   expect(find.text('idle'), findsOneWidget);
   expect(find.byType(BackButton).hitTestable(), findsOneWidget);
-  expect(_inBar(find.byTooltip('Search')), findsOneWidget);
+  expect(find.byType(SearchField), findsOneWidget);
   expect(_inBar(find.text('Add')), findsOneWidget);
 }
 
 void _expectSorting(WidgetTester tester) {
   expect(find.text('sorting'), findsOneWidget);
   expect(find.byType(BackButton).hitTestable(), findsNothing);
-  expect(_inBar(find.byTooltip('Search')), findsNothing);
+  expect(find.byType(SearchField), findsNothing);
   expect(_inBar(find.text('Add')), findsNothing);
   final toggle = _inBar(find.widgetWithGlyph(IconButton, AppGlyphs.sort));
   expect(tester.widget<IconButton>(toggle).isSelected, isTrue);

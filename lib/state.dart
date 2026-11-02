@@ -1,25 +1,23 @@
 import 'dart:async';
 
-import 'common/common.dart';
-import 'enum/enum.dart';
-import 'models/models.dart';
-
-import 'package:fl_clash/common/theme.dart';
 import 'package:fl_clash/providers/app.dart';
 import 'package:fl_clash/providers/config.dart';
+import 'package:fl_clash/ui/ui.dart';
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'common/common.dart';
+import 'enum/enum.dart';
+import 'models/models.dart';
+
 class GlobalState {
   static GlobalState? _instance;
   GlobalKey<NavigatorState> get navigatorKey => rootNavigatorKey;
-  late final String appEnv;
-  late final PackageInfo packageInfo;
-  Function? updateCurrentDelayDebounce;
+  late String appEnv;
+  late PackageInfo packageInfo;
   late Measure measure;
-  late CommonTheme theme;
   late ProviderContainer container;
   bool needInitStatus = true;
 
@@ -33,6 +31,7 @@ class GlobalState {
   }
 
   String? lastConfigMd5;
+  ConfigCounts? lastConfigCounts;
   bool isAttach = false;
 
   GlobalState._internal();
@@ -124,7 +123,7 @@ class GlobalState {
         dialogs.showNotifier(message, level: MessageLevel.error);
       } else {
         unawaited(
-          dialogs.showMessage(
+          dialogs.showAlert(
             title: title ?? currentAppLocalizations.tip,
             message: TextSpan(text: message),
           ),

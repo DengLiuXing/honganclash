@@ -27,6 +27,7 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+/.widget_preview/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
@@ -78,19 +79,3 @@ devtools_options.yaml
 .fvm/
 .fvmrc
 /coverage/lcov.info
-
-# local: extracted from a tarball, symlinked skill dirs are unreadable on Windows
-.claude/skills/
-
-# 红岸账号相关：抓下来的节点/订阅文件含账号凭据（节点密码=账号 uuid、订阅 token），切勿提交
-hongan_nodes.yaml
-hongan_subscription_raw.yaml
-hongan_session.json
-hongan_template.json
-hongan_servers.json
-_sub_state.json
-_sub/
-*.session.json
-
-# hongan_fetch --verify 的临时 mihomo 目录
-.hongan-verify/

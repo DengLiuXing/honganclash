@@ -1,7 +1,5 @@
 import 'dart:io';
 
-import 'package:fl_clash/common/common.dart';
-import 'package:fl_clash/common/theme.dart';
 import 'package:fl_clash/core/core.dart';
 import 'package:fl_clash/core/interface.dart';
 import 'package:fl_clash/enum/enum.dart';
@@ -17,31 +15,18 @@ import 'package:fl_clash/providers/database.dart';
 import 'package:fl_clash/providers/route_state.dart';
 import 'package:fl_clash/providers/state.dart';
 import 'package:fl_clash/state.dart';
+import 'package:fl_clash/ui/ui.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../helpers/app_paths.dart';
+import '../helpers/test_database_providers.dart';
 import '../helpers/test_profiles.dart';
 
 class _MockCoreHandlerInterface extends Mock implements CoreHandlerInterface {}
-
-class _FakePathProvider extends PathProviderPlatform {
-  final String root;
-
-  _FakePathProvider(this.root);
-
-  @override
-  Future<String?> getTemporaryPath() async => root;
-
-  @override
-  Future<String?> getApplicationSupportPath() async => root;
-
-  @override
-  Future<String?> getApplicationCachePath() async => root;
-}
 
 const _nullProfileSetupState = SetupState(
   profileId: null,
@@ -76,6 +61,11 @@ CoreEvent _geoUpdate({
 class _ApplyRecordingSetupAction extends SetupAction {
   int updates = 0;
   int applies = 0;
+  int globalRulesApplies = 0;
+  final List<bool> appliedForce = [];
+
+  @override
+  void applyIfGlobalRulesUsed() => globalRulesApplies++;
 
   @override
   Future<void> updateConfigDebounce() async {
@@ -85,6 +75,7 @@ class _ApplyRecordingSetupAction extends SetupAction {
   @override
   void applyProfileDebounce({bool silence = false, bool force = false}) {
     applies++;
+    appliedForce.add(force);
   }
 }
 
@@ -118,7 +109,6 @@ Future<ProviderContainer> _pumpCoreManager(
         supportedLocales: AppLocalizations.delegate.supportedLocales,
         builder: (context, child) {
           globalState.measure = Measure.of(context, 1);
-          globalState.theme = CommonTheme.of(context, 1);
           return StatusManager(child: child!);
         },
         home: const CoreManager(child: SizedBox()),
@@ -161,9 +151,7 @@ void main() {
     profileSwitchTempDir = Directory.systemTemp.createTempSync(
       'core_manager_test',
     );
-    PathProviderPlatform.instance = _FakePathProvider(
-      profileSwitchTempDir.path,
-    );
+    await useAppPaths(profileSwitchTempDir);
   });
 
   tearDownAll(() {
@@ -360,6 +348,53 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('a test URL change forces the apply, which alone hands it '
+      'over', (tester) async {
+    final setupAction = _ApplyRecordingSetupAction();
+    final container = await _pumpCoreManager(
+      tester,
+      _coreInterface(),
+      overrides: [setupActionProvider.overrideWith(() => setupAction)],
+    );
+
+    container
+        .read(patchClashConfigProvider.notifier)
+        .update((state) => state.copyWith(hosts: const {'a.test': '1.1.1.1'}));
+    await tester.pump();
+    container
+        .read(patchClashConfigProvider.notifier)
+        .update((state) => state.copyWith(testUrl: 'https://probe.test/204'));
+    await tester.pump();
+
+    expect(setupAction.appliedForce, [false, true]);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a change to the global added rules, not their first load, '
+      'asks for an apply', (tester) async {
+    final setupAction = _ApplyRecordingSetupAction();
+    final container = await _pumpCoreManager(
+      tester,
+      _coreInterface(),
+      overrides: [
+        setupActionProvider.overrideWith(() => setupAction),
+        globalRulesProvider.overrideWith(() => TestGlobalRules()),
+      ],
+    );
+    await tester.pump();
+    expect(setupAction.globalRulesApplies, 0);
+
+    container.read(globalRulesProvider.notifier).value = [
+      const Rule(id: 1, content: 'a.test', ruleTarget: 'DIRECT'),
+    ];
+    await tester.pump();
+
+    expect(setupAction.globalRulesApplies, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('core logs are recorded for the logs view', (tester) async {
     final coreInterface = _coreInterface();
     final container = await _pumpCoreManager(tester, coreInterface);
@@ -442,19 +477,14 @@ void main() {
     coreEventManager.sendEvent(
       const CoreEvent(
         type: CoreEventType.routeChanged,
-        data: {
-          'core-epoch': 7,
-          'picks-version': 42,
-          'picks': {'Proxy': 'HK-01'},
-        },
+        data: {'core-epoch': 7, 'route-version': 42},
       ),
     );
     await tester.pump();
 
     final route = container.read(routeTrackerProvider);
     expect(route.coreEpoch, 7);
-    expect(route.picksVersion, 42);
-    expect(route.picks, {'Proxy': 'HK-01'});
+    expect(route.routeVersion, 42);
     expect(route.synced, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());

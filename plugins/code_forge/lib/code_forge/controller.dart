@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:flutter/services.dart';
@@ -13,6 +15,7 @@ import 'rope.dart';
 import 'text_offsets.dart';
 import 'word_chars.dart';
 
+part 'controller/document.dart';
 part 'controller/navigation.dart';
 part 'controller/editing.dart';
 part 'controller/ime.dart';
@@ -184,6 +187,10 @@ class CodeForgeController implements DeltaTextInputClient {
 
   Rope _rope = Rope('');
   Rope get rope => _rope;
+
+  Rope? _original;
+  int _loadedVersion = 0, _loadedLength = 0;
+  ({int version, bool modified})? _modifiedCache;
   TextSelection _selection = const TextSelection.collapsed(offset: 0);
 
   /// The text input connection to the platform.
@@ -360,11 +367,68 @@ class CodeForgeController implements DeltaTextInputClient {
   /// Lines break at LF alone, and a line's text leaves out the CR of a CRLF
   /// pair that its offsets still count, so CRLF text comes in as LF.
   static String normalizeLineBreaks(String text) =>
-      text.replaceAll('\r\n', '\n');
+      text.contains('\r') ? text.replaceAll('\r\n', '\n') : text;
 
   /// Keeps the undo history; a caller loading another file clears it.
   set text(String newText) {
     final document = normalizeLineBreaks(newText);
+    _replaceDocument(Rope(document), cachedText: document);
+  }
+
+  void load(CodeForgeDocument document) {
+    _replaceDocument(document._rope.snapshot(), cachedText: document._text);
+  }
+
+  /// Whether the text differs from the one last loaded.
+  bool get isModified {
+    if (isComposingActive) return true;
+    if (_currentVersion == _loadedVersion) return false;
+    if (length != _loadedLength) return true;
+    final original = _original;
+    if (original == null) return false;
+    final cached = _modifiedCache;
+    if (cached != null && cached.version == _currentVersion) {
+      return cached.modified;
+    }
+    final modified = !isBufferActive
+        ? !_rope.sameText(original)
+        : !_rope.sameText(
+            original,
+            spliceStart: _bufferLineRopeStart,
+            spliceLength: _bufferLineOriginalLength,
+            spliceText: _bufferLineText!,
+          );
+    _modifiedCache = (version: _currentVersion, modified: modified);
+    return modified;
+  }
+
+  Future<Uint8List> readBytes() async {
+    if (length < backgroundTextLength) return utf8.encode(text);
+    _flushBuffer();
+    final snapshot = _rope.snapshot();
+    try {
+      return await snapshot.utf8Bytes();
+    } finally {
+      snapshot.dispose();
+    }
+  }
+
+  Future<String> readText() async {
+    if (length < backgroundTextLength) return text;
+    final bytes = await readBytes();
+    return Isolate.run(() => utf8.decode(bytes));
+  }
+
+  /// Unlike [load], an edit that can be undone and keeps the caret.
+  void replaceDocument(CodeForgeDocument document) {
+    commitComposition();
+    if (_rope.sameText(document._rope)) return;
+    _closeCompletion();
+    _replaceRope(document._rope.snapshot(), _selection);
+    notifyListeners();
+  }
+
+  void _replaceDocument(Rope rope, {String? cachedText}) {
     final previousLength = length;
     _flushTimer?.cancel();
     _debounceTimer?.cancel();
@@ -379,12 +443,16 @@ class CodeForgeController implements DeltaTextInputClient {
     }
     _pendingSelectionReplacement = null;
     _rope.dispose();
-    _rope = Rope(document);
+    _rope = rope;
     _currentVersion++;
+    _original?.dispose();
+    _original = rope.snapshot();
+    _loadedVersion = _currentVersion;
+    _loadedLength = rope.length;
     _lineEditLog.clear();
     _lineEditLogStart = _currentVersion;
-    _cachedText = document;
-    _cachedTextVersion = _currentVersion;
+    _cachedText = cachedText;
+    _cachedTextVersion = cachedText == null ? -1 : _currentVersion;
     _selection = TextSelection.collapsed(offset: _rope.length);
     foldings = {};
     _change = CodeForgeChange._().._replaced = true;
@@ -883,5 +951,6 @@ class CodeForgeController implements DeltaTextInputClient {
     suggestionsNotifier.dispose();
     selectedSuggestionNotifier.dispose();
     _rope.dispose();
+    _original?.dispose();
   }
 }

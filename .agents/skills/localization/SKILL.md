@@ -25,6 +25,9 @@ Do not use this for README translation sync or manual edits to generated localiz
    - `arb/intl_zh_CN.arb`
    - `arb/intl_ja.arb`
    - `arb/intl_ru.arb`
+   - `arb/intl_fr.arb`
+   - `arb/intl_es.arb`
+   - `arb/intl_ko.arb`
 4. Replace inline strings with existing project accessors:
    - Widgets with `BuildContext`: `context.appLocalizations.key` from `lib/common/context.dart`.
    - Controllers/providers/non-widget code: `currentAppLocalizations.key` from `lib/common/app_localizations.dart`.
@@ -42,5 +45,6 @@ Do not use this for README translation sync or manual edits to generated localiz
 
 ## Pitfalls
 
-- If ja/ru still show English, fix ja/ru source ARB values and regenerate. Do not edit generated Dart.
+- A locale that still shows English lacks the key or carries an English value in its source ARB; fix that ARB and
+  regenerate. Do not edit generated Dart.
 - Ignore `lib/l10n/intl/**` and `lib/**/generated/**` during text scans.

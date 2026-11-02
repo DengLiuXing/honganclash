@@ -6,10 +6,9 @@ entry together with its workaround; add one whenever a new workaround is pinned 
 
 ## Stable cadence
 
-Flutter ships a stable release about once a quarter, three minor versions apart (3.41 in February, 3.44 in May, 3.47
-in August 2026). The two minors in between (3.48, 3.49) are beta only, so a fix that lands on `main` reaches stable
-in the next multiple, 3.50, expected around mid-November 2026. Hotfix releases (3.47.x) carry only cherry-picks
-listed in the SDK's `CHANGELOG.md`.
+Flutter ships a stable release about once a quarter, three minor versions apart (3.41, 3.44, 3.47). The two minors in
+between are beta only, so a fix that lands on `main` reaches the next stable minor, three above the current one.
+Hotfix releases (3.47.x) carry only cherry-picks listed in the SDK's `CHANGELOG.md`.
 
 ## Impeller disabled on Intel macOS release builds
 
@@ -29,6 +28,22 @@ listed in the SDK's `CHANGELOG.md`.
   changelog lists #191538). Before dropping the step, build the Intel DMG without it and scroll the proxies and
   dashboard pages on an Intel Mac with its integrated GPU driving the built-in display; an external display can
   switch to the discrete GPU and hide the flicker.
+
+## Impeller disabled on Windows
+
+- **Bug:** [flutter/flutter#193504](https://github.com/flutter/flutter/issues/193504), reported here as #2423. From
+  3.47 the Windows embedder enables Impeller by default (`flutter_windows_engine.cc`). On some machines (seen on
+  Windows 11 26200 with an Intel Arc integrated GPU) dragging a window edge freezes the window on its last frame:
+  the EGL context is lost, no frame of the new size is ever produced, and every later frame is dropped while Dart
+  keeps running. A dump shows no thread blocked; hiding and showing the window leaves it white until the app is
+  restarted. Upstream could not reproduce it and the issue is still open.
+- **Workaround:** `wWinMain` in `windows/runner/main.cpp` calls
+  `project.set_impeller_switch(flutter::ImpellerSwitch::Disabled)`, so every Windows build renders with Skia. Release
+  builds ignore `FLUTTER_ENGINE_SWITCHES`, so users cannot turn Impeller off themselves.
+- **Side effect:** Windows draws Liquid Glass through its Skia fallback, and blur, shadows and text render as Skia
+  does; judge Windows visual reports against Skia.
+- **Remove when:** a stable `FLUTTER_VERSION` fixes #193504. Before dropping the call, build with Impeller on that SDK
+  and drag every window edge for a minute on a machine that reproduced the freeze; the window has to keep redrawing.
 
 ## Wrong-size back buffer on macOS
 
@@ -91,3 +106,13 @@ listed in the SDK's `CHANGELOG.md`.
 - **Remove when:** the Linux engine reports minimized windows on Wayland, which needs GTK 4 or xdg-shell's
   `suspended` state. Check in a GNOME Wayland session without the workaround: minimizing from the caption button
   must log `AppLifecycleState.hidden`.
+
+## Liquid glass saves around the transform of a blurring layer
+
+- **Bug:** not filed upstream. On 3.47 Impeller scales a `saveLayer`'s image filter by a transform set inside the
+  layer that is still in effect when the layer is restored. A host's capture shrinks each pane's slot inside the
+  layer that blurs it, so its blur vanished at a quarter scale and spread half again as far at 1.5.
+- **Workaround:** `_LiquidGlassHostLayer._snapshot` sets each slot's transform inside a `save` of its own, and each
+  band's offset, restored before the layer is.
+- **Remove when:** without that `save`, the frosted-pane case of `test/widgets/liquid_glass_host_test.dart` passes
+  under `flutter test --enable-impeller`.

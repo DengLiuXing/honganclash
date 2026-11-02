@@ -1,15 +1,18 @@
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
+import 'package:fl_clash/features/form/form.dart';
 import 'package:fl_clash/l10n/l10n.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/views/config/on_demand.dart';
+import 'package:fl_clash/views/config/override.dart';
 import 'package:fl_clash/views/config/user_agents.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-part 'general/port_dialog.dart';
+part 'general/overrides.dart';
+part 'general/port_form.dart';
 
 class LogLevelItem extends ConsumerWidget {
   const LogLevelItem({super.key});
@@ -45,39 +48,19 @@ class UaItem extends ConsumerWidget {
   }
 }
 
-class TestUrlItem extends ConsumerWidget {
-  const TestUrlItem({super.key});
+class DelayTestTimeoutItem extends ConsumerWidget {
+  const DelayTestTimeoutItem({super.key});
 
   @override
   Widget build(BuildContext context, ref) {
-    final appLocalizations = context.appLocalizations;
-    final testUrl = ref.watch(
-      appSettingProvider.select((state) => state.testUrl),
-    );
-    return ListItem.input(
-      title: Text(appLocalizations.testUrl),
-      subtitle: Text(testUrl),
-      resetValue: defaultTestUrl,
-      dialogTitle: appLocalizations.testUrl,
-      value: testUrl,
-      maxLength: TextInputLimits.url,
-      validator: (String? value) {
-        if (value == null || value.isEmpty) {
-          return appLocalizations.emptyTip(appLocalizations.testUrl);
-        }
-        if (!value.isUrl) {
-          return appLocalizations.urlTip(appLocalizations.testUrl);
-        }
-        return null;
-      },
-      onChanged: (String? value) {
-        if (value == null) {
-          return;
-        }
-        ref
-            .read(appSettingProvider.notifier)
-            .update((state) => state.copyWith(testUrl: value));
-      },
+    return ConfigOptionsItem<int>(
+      title: (l) => l.delayTestTimeout,
+      options: delayTestTimeoutOptions,
+      textBuilder: (value) => '$value ms',
+      selector: appSettingProvider.select((state) => state.delayTestTimeout),
+      onChanged: (ref, value) => ref
+          .read(appSettingProvider.notifier)
+          .update((state) => state.copyWith(delayTestTimeout: value)),
     );
   }
 }
@@ -85,8 +68,11 @@ class TestUrlItem extends ConsumerWidget {
 class PortItem extends ConsumerWidget {
   const PortItem({super.key});
 
-  Future<void> handleShowPortDialog() async {
-    await dialogs.showCommonDialog(child: const _PortDialog());
+  Future<void> handleShowPortForm(BuildContext context) async {
+    await showFormSheet<void>(
+      context: context,
+      builder: (_) => const _PortForm(),
+    );
   }
 
   @override
@@ -99,7 +85,7 @@ class PortItem extends ConsumerWidget {
       title: Text(appLocalizations.port),
       subtitle: Text('$mixedPort'),
       onTap: () {
-        handleShowPortDialog();
+        handleShowPortForm(context);
       },
     );
   }
@@ -130,6 +116,9 @@ class HostsItem extends ConsumerWidget {
         subtitleBuilder: (item) => Text(item.value),
       ),
       onChanged: (value) {
+        if (value is! Map<String, String>) {
+          return;
+        }
         ref
             .read(patchClashConfigProvider.notifier)
             .update((state) => state.copyWith(hosts: value));
@@ -329,17 +318,7 @@ class GeneralView extends ConsumerWidget {
 
   List<Widget> _connectionItems() {
     return [
-      const TestUrlItem(),
-      _clashToggle(
-        title: (l) => l.unifiedDelay,
-        select: (state) => state.unifiedDelay,
-        update: (state, value) => state.copyWith(unifiedDelay: value),
-      ),
-      _clashToggle(
-        title: (l) => l.tcpConcurrent,
-        select: (state) => state.tcpConcurrent,
-        update: (state, value) => state.copyWith(tcpConcurrent: value),
-      ),
+      const DelayTestTimeoutItem(),
       _clashToggle(
         title: (l) => l.findProcessMode,
         select: (state) => state.findProcessMode == FindProcessMode.always,
@@ -378,13 +357,9 @@ class GeneralView extends ConsumerWidget {
 
   List<Widget> _coreItems() {
     return [
-      _clashToggle(
-        title: (l) => 'IPv6',
-        select: (state) => state.ipv6,
-        update: (state, value) => state.copyWith(ipv6: value),
-      ),
-      const HostsItem(),
+      const HostsItem(key: ValueKey(#hosts)),
       ConfigToggleItem(
+        key: const ValueKey(#appendSystemDns),
         title: (l) => l.appendSystemDns,
         selector: networkSettingProvider.select(
           (state) => state.appendSystemDns,
@@ -392,15 +367,6 @@ class GeneralView extends ConsumerWidget {
         onChanged: (ref, value) => ref
             .read(networkSettingProvider.notifier)
             .update((state) => state.copyWith(appendSystemDns: value)),
-      ),
-      _clashToggle(
-        title: (l) => l.geodataLoader,
-        select: (state) => state.geodataLoader == GeodataLoader.memconservative,
-        update: (state, value) => state.copyWith(
-          geodataLoader: value
-              ? GeodataLoader.memconservative
-              : GeodataLoader.standard,
-        ),
       ),
     ];
   }
@@ -413,12 +379,6 @@ class GeneralView extends ConsumerWidget {
         select: (state) => state.openLogs,
         update: (state, value) => state.copyWith(openLogs: value),
       ),
-      if (system.isAndroid)
-        _appSettingToggle(
-          title: (l) => l.crashlytics,
-          select: (state) => state.crashlytics,
-          update: (state, value) => state.copyWith(crashlytics: value),
-        ),
     ];
   }
 
@@ -436,11 +396,12 @@ class GeneralView extends ConsumerWidget {
     return BaseScaffold(
       title: appLocalizations.general,
       body: ListView(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16,
-        ).copyWith(top: context.appBarInset, bottom: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16).copyWith(
+          top: context.sectionsTopPadding,
+          bottom: 16 + context.bottomInset,
+        ),
         children: [
-          generateSectionV3(
+          generateSection(
             title: appLocalizations.startupAndBackground,
             items: _startupItems(appLocalizations),
             footer: [
@@ -449,12 +410,12 @@ class GeneralView extends ConsumerWidget {
               appLocalizations.onDemandDesc,
             ].join('\n'),
           ),
-          generateSectionV3(
+          generateSection(
             title: appLocalizations.requestsAndUpdates,
             items: _requestItems(),
             footer: appLocalizations.checkCertificateDesc,
           ),
-          generateSectionV3(
+          generateSection(
             title: appLocalizations.inbound,
             items: _inboundItems(
               authentication: authentication,
@@ -465,23 +426,20 @@ class GeneralView extends ConsumerWidget {
               appLocalizations.authenticationDesc,
             ].join('\n'),
           ),
-          generateSectionV3(
+          generateSection(
             title: appLocalizations.connection,
             items: _connectionItems(),
             footer: appLocalizations.autoCloseConnectionsDesc,
           ),
-          generateSectionV3(
+          OverrideSection(
             title: appLocalizations.core,
+            spec: _generalOverrideSpec,
             items: _coreItems(),
-            footer: appLocalizations.ipv6Desc,
           ),
-          generateSectionV3(
+          generateSection(
             title: appLocalizations.logsAndDiagnostics,
             items: _logItems(),
-            footer: [
-              appLocalizations.logcatDesc,
-              if (system.isAndroid) appLocalizations.crashlyticsTip,
-            ].join('\n'),
+            footer: appLocalizations.logcatDesc,
           ),
         ],
       ),

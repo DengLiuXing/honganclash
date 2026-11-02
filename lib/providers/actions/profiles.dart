@@ -35,13 +35,16 @@ class ProfilesAction extends _$ProfilesAction {
     }
   }
 
-  Future<String> validateConfigWithData(String data) async {
+  Future<String> validateConfigWithData(List<int> data) async {
     return _core.validateConfigWithData(data);
   }
 
   Future<void> autoUpdateProfiles() async {
-    for (final profile in ref.read(profilesProvider)) {
-      if (!profile.autoUpdate) continue;
+    for (final id in [
+      for (final profile in ref.read(profilesProvider)) profile.id,
+    ]) {
+      final profile = ref.read(profilesProvider).getProfile(id);
+      if (profile == null || !profile.autoUpdate) continue;
       final isNotNeedUpdate = profile.lastUpdateDate
           ?.add(profile.autoUpdateDuration)
           .isBeforeNow;
@@ -123,8 +126,11 @@ class ProfilesAction extends _$ProfilesAction {
   }
 
   Future<void> updateProfiles() async {
-    for (final profile in ref.read(profilesProvider)) {
-      if (profile.type != ProfileType.url) continue;
+    for (final id in [
+      for (final profile in ref.read(profilesProvider)) profile.id,
+    ]) {
+      final profile = ref.read(profilesProvider).getProfile(id);
+      if (profile == null || profile.type != ProfileType.url) continue;
       await updateProfile(profile, showLoading: true);
     }
   }
@@ -138,8 +144,19 @@ class ProfilesAction extends _$ProfilesAction {
         : null;
     try {
       ref.read(profilesProvider.notifier).put(profile);
-      final newProfile = await profile.update(
+      final updated = await profile.update(
         validate: (path, key) => _core.validateProfile(path, key),
+      );
+      // The download can take minutes; edits and deletes made meanwhile win.
+      final latest = ref.read(profilesProvider).getProfile(profile.id);
+      if (latest == null) {
+        await clearEffect(profile.id);
+        return;
+      }
+      final newProfile = latest.copyWith(
+        label: latest.label.takeFirstValid([updated.label]),
+        subscriptionInfo: updated.subscriptionInfo,
+        lastUpdateDate: updated.lastUpdateDate,
       );
       ref.read(profilesProvider.notifier).put(newProfile);
       if (profile.id == ref.read(currentProfileIdProvider)) {
@@ -183,46 +200,6 @@ class ProfilesAction extends _$ProfilesAction {
           validate: (path, key) => _core.validateProfile(path, key),
         ),
       ),
-      title: currentAppLocalizations.addProfile,
-    );
-    if (profile != null) {
-      putProfile(profile);
-    }
-  }
-
-  Future<void> addHonganProfile(HonganSubscription subscription) async {
-    _showProfiles();
-    final profile = await globalState.loadingRun(
-      tag: LoadingTag.profiles,
-      () async {
-        if (subscription.jwt.isEmpty) {
-          throw const HonganApiException('登录状态已失效，请重新登录');
-        }
-        final uuid = subscription.uuid;
-        if (uuid == null || uuid.isEmpty) {
-          throw const HonganApiException('面板未返回账号 uuid');
-        }
-        final servers = await honganApi.servers(jwt: subscription.jwt);
-        if (servers.isEmpty) {
-          throw const HonganApiException('面板没有在线节点');
-        }
-        final next = Profile.normal(label: '红岸云').copyWith(
-          autoUpdate: false,
-          subscriptionInfo: SubscriptionInfo(
-            upload: subscription.upload,
-            download: subscription.download,
-            total: subscription.transferEnable,
-            expire:
-                (subscription.expiredAt?.millisecondsSinceEpoch ?? 0) ~/ 1000,
-          ),
-        );
-        return next.saveFile(
-          Uint8List.fromList(
-            utf8.encode(buildHonganConfig(servers: servers, uuid: uuid)),
-          ),
-          validate: (path, key) => _core.validateProfile(path, key),
-        );
-      },
       title: currentAppLocalizations.addProfile,
     );
     if (profile != null) {
@@ -475,21 +452,10 @@ class ProfilesAction extends _$ProfilesAction {
         );
   }
 
-  void setProfileAndAutoApply(Profile profile) {
-    ref.read(profilesProvider.notifier).put(profile);
-    if (profile.id == ref.read(currentProfileIdProvider)) {
-      ref.read(setupActionProvider.notifier).applyProfileDebounce();
-    }
-  }
-
   Future<void> addProfileFormQrCode() async {
     final url = await globalState.safeRun(picker.pickerConfigQRCode);
     if (url == null) return;
     unawaited(addProfileFromLink(url));
-  }
-
-  void reorder(List<Profile> profiles) {
-    ref.read(profilesProvider.notifier).reorder(profiles);
   }
 
   Future<void> clearEffect(int profileId) async {

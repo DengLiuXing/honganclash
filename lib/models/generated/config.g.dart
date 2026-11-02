@@ -29,21 +29,20 @@ _AppSettingProps _$AppSettingPropsFromJson(
   autoRun: json['autoRun'] as bool? ?? false,
   openLogs: json['openLogs'] as bool? ?? false,
   closeConnections: json['closeConnections'] as bool? ?? true,
-  testUrl: json['testUrl'] as String? ?? defaultTestUrl,
+  delayTestTimeout:
+      (json['delayTestTimeout'] as num?)?.toInt() ?? defaultDelayTestTimeout,
   tabAnimation:
       $enumDecodeNullable(
         _$TabAnimationEnumMap,
         _readTabAnimation(json, 'tabAnimation'),
       ) ??
-      TabAnimation.slide,
+      TabAnimation.fade,
   floatingNavigationBar: json['floatingNavigationBar'] as bool? ?? true,
   autoCheckUpdate: json['autoCheckUpdate'] as bool? ?? true,
   sidebarExpanded:
       _readSidebarExpanded(json, 'sidebarExpanded') as bool? ?? true,
   acceptedDisclaimerVersion:
       (json['acceptedDisclaimerVersion'] as num?)?.toInt() ?? 0,
-  crashlyticsTip: json['crashlyticsTip'] as bool? ?? false,
-  crashlytics: json['crashlytics'] as bool? ?? false,
   minimizeOnExit: json['minimizeOnExit'] as bool? ?? true,
   hidden: json['hidden'] as bool? ?? false,
   developerMode: json['developerMode'] as bool? ?? false,
@@ -51,6 +50,7 @@ _AppSettingProps _$AppSettingPropsFromJson(
       $enumDecodeNullable(_$RestoreStrategyEnumMap, json['restoreStrategy']) ??
       RestoreStrategy.compatible,
   showTrayTitle: json['showTrayTitle'] as bool? ?? true,
+  monochromeTrayIcon: json['monochromeTrayIcon'] as bool? ?? true,
   checkCertificate: json['checkCertificate'] as bool? ?? true,
   userAgents:
       (_readUserAgents(json, 'userAgents') as List<dynamic>?)
@@ -77,7 +77,16 @@ _AppSettingProps _$AppSettingPropsFromJson(
           ?.map((e) => e as String)
           .toList() ??
       const [],
-  currentService: json['currentService'] as String?,
+  tableColumnWidths:
+      (json['tableColumnWidths'] as Map<String, dynamic>?)?.map(
+        (k, e) => MapEntry(
+          k,
+          (e as Map<String, dynamic>).map(
+            (k, e) => MapEntry(k, (e as num).toDouble()),
+          ),
+        ),
+      ) ??
+      const {},
 );
 
 Map<String, dynamic> _$AppSettingPropsToJson(_AppSettingProps instance) =>
@@ -93,19 +102,18 @@ Map<String, dynamic> _$AppSettingPropsToJson(_AppSettingProps instance) =>
       'autoRun': instance.autoRun,
       'openLogs': instance.openLogs,
       'closeConnections': instance.closeConnections,
-      'testUrl': instance.testUrl,
+      'delayTestTimeout': instance.delayTestTimeout,
       'tabAnimation': _$TabAnimationEnumMap[instance.tabAnimation]!,
       'floatingNavigationBar': instance.floatingNavigationBar,
       'autoCheckUpdate': instance.autoCheckUpdate,
       'sidebarExpanded': instance.sidebarExpanded,
       'acceptedDisclaimerVersion': instance.acceptedDisclaimerVersion,
-      'crashlyticsTip': instance.crashlyticsTip,
-      'crashlytics': instance.crashlytics,
       'minimizeOnExit': instance.minimizeOnExit,
       'hidden': instance.hidden,
       'developerMode': instance.developerMode,
       'restoreStrategy': _$RestoreStrategyEnumMap[instance.restoreStrategy]!,
       'showTrayTitle': instance.showTrayTitle,
+      'monochromeTrayIcon': instance.monochromeTrayIcon,
       'checkCertificate': instance.checkCertificate,
       'userAgents': instance.userAgents,
       'filters': instance.filters,
@@ -114,7 +122,7 @@ Map<String, dynamic> _$AppSettingPropsToJson(_AppSettingProps instance) =>
       'editorFontSize': _$EditorFontSizeEnumMap[instance.editorFontSize]!,
       'serviceOrder': instance.serviceOrder,
       'disabledServices': instance.disabledServices,
-      'currentService': instance.currentService,
+      'tableColumnWidths': instance.tableColumnWidths,
     };
 
 const _$TabAnimationEnumMap = {
@@ -134,22 +142,17 @@ const _$EditorFontSizeEnumMap = {
 };
 
 const _$DashboardWidgetEnumMap = {
+  DashboardWidget.currentOutbound: 'currentOutbound',
   DashboardWidget.networkSpeed: 'networkSpeed',
   DashboardWidget.outboundMode: 'outboundMode',
-  DashboardWidget.trafficUsage: 'trafficUsage',
-  DashboardWidget.networkDetection: 'networkDetection',
-  DashboardWidget.tunButton: 'tunButton',
   DashboardWidget.vpnButton: 'vpnButton',
-  DashboardWidget.systemProxyButton: 'systemProxyButton',
+  DashboardWidget.networkTakeover: 'networkTakeover',
+  DashboardWidget.serviceStatus: 'serviceStatus',
+  DashboardWidget.profiles: 'profiles',
+  DashboardWidget.proxyGroups: 'proxyGroups',
+  DashboardWidget.connectionStats: 'connectionStats',
   DashboardWidget.intranetIp: 'intranetIp',
   DashboardWidget.memoryInfo: 'memoryInfo',
-  DashboardWidget.serviceStatus: 'serviceStatus',
-  DashboardWidget.dnsQueries: 'dnsQueries',
-  DashboardWidget.requests: 'requests',
-  DashboardWidget.connections: 'connections',
-  DashboardWidget.runTime: 'runTime',
-  DashboardWidget.proxyGroups: 'proxyGroups',
-  DashboardWidget.profiles: 'profiles',
 };
 
 _AccessControlProps _$AccessControlPropsFromJson(Map<String, dynamic> json) =>
@@ -283,7 +286,7 @@ _ProxiesStyleProps _$ProxiesStylePropsFromJson(Map<String, dynamic> json) =>
     _ProxiesStyleProps(
       type:
           $enumDecodeNullable(_$ProxiesTypeEnumMap, json['type']) ??
-          ProxiesType.tab,
+          ProxiesType.list,
       sortType:
           $enumDecodeNullable(_$ProxiesSortTypeEnumMap, json['sortType']) ??
           ProxiesSortType.none,
@@ -293,9 +296,9 @@ _ProxiesStyleProps _$ProxiesStylePropsFromJson(Map<String, dynamic> json) =>
       iconStyle: json['iconStyle'] == null
           ? ProxiesIconStyle.filled
           : proxiesIconStyleSafeFromJson(json['iconStyle']),
-      cardType:
-          $enumDecodeNullable(_$ProxyCardTypeEnumMap, json['cardType']) ??
-          ProxyCardType.shrink,
+      cardType: json['cardType'] == null
+          ? ProxyCardType.standard
+          : proxyCardTypeSafeFromJson(json['cardType']),
       hideTimeoutProxies: json['hideTimeoutProxies'] as bool? ?? false,
     );
 
@@ -323,16 +326,16 @@ const _$ProxiesLayoutEnumMap = {
   ProxiesLayout.tight: 'tight',
 };
 
-const _$ProxyCardTypeEnumMap = {
-  ProxyCardType.expand: 'expand',
-  ProxyCardType.shrink: 'shrink',
-  ProxyCardType.min: 'min',
-};
-
 const _$ProxiesIconStyleEnumMap = {
   ProxiesIconStyle.filled: 'filled',
   ProxiesIconStyle.plain: 'plain',
   ProxiesIconStyle.hidden: 'hidden',
+};
+
+const _$ProxyCardTypeEnumMap = {
+  ProxyCardType.loose: 'loose',
+  ProxyCardType.standard: 'standard',
+  ProxyCardType.compact: 'compact',
 };
 
 _TextScale _$TextScaleFromJson(Map<String, dynamic> json) => _TextScale(
@@ -352,15 +355,21 @@ _ThemeProps _$ThemePropsFromJson(Map<String, dynamic> json) => _ThemeProps(
       defaultPrimaryColors,
   themeMode:
       $enumDecodeNullable(_$ThemeModeEnumMap, json['themeMode']) ??
-      ThemeMode.dark,
-  schemeVariant:
+      ThemeMode.system,
+  colorStyle:
       $enumDecodeNullable(
-        _$DynamicSchemeVariantEnumMap,
-        json['schemeVariant'],
+        _$ColorStyleEnumMap,
+        _readColorStyle(json, 'colorStyle'),
       ) ??
-      DynamicSchemeVariant.content,
+      ColorStyle.vivid,
   pureBlack: json['pureBlack'] as bool? ?? false,
-  sidebarBlur: json['sidebarBlur'] as bool? ?? true,
+  sidebarBlur: json['sidebarBlur'] as bool? ?? false,
+  liquidGlass:
+      $enumDecodeNullable(
+        _$LiquidGlassModeEnumMap,
+        _readLiquidGlass(json, 'liquidGlass'),
+      ) ??
+      LiquidGlassMode.none,
   textScale: json['textScale'] == null
       ? const TextScale()
       : TextScale.fromJson(json['textScale'] as Map<String, dynamic>),
@@ -372,9 +381,10 @@ Map<String, dynamic> _$ThemePropsToJson(_ThemeProps instance) =>
       'primaryColor': instance.primaryColor,
       'primaryColors': instance.primaryColors,
       'themeMode': _$ThemeModeEnumMap[instance.themeMode]!,
-      'schemeVariant': _$DynamicSchemeVariantEnumMap[instance.schemeVariant]!,
+      'colorStyle': _$ColorStyleEnumMap[instance.colorStyle]!,
       'pureBlack': instance.pureBlack,
       'sidebarBlur': instance.sidebarBlur,
+      'liquidGlass': _$LiquidGlassModeEnumMap[instance.liquidGlass]!,
       'textScale': instance.textScale,
       'systemFontFamily': instance.fontFamily,
     };
@@ -385,16 +395,17 @@ const _$ThemeModeEnumMap = {
   ThemeMode.dark: 'dark',
 };
 
-const _$DynamicSchemeVariantEnumMap = {
-  DynamicSchemeVariant.tonalSpot: 'tonalSpot',
-  DynamicSchemeVariant.fidelity: 'fidelity',
-  DynamicSchemeVariant.monochrome: 'monochrome',
-  DynamicSchemeVariant.neutral: 'neutral',
-  DynamicSchemeVariant.vibrant: 'vibrant',
-  DynamicSchemeVariant.expressive: 'expressive',
-  DynamicSchemeVariant.content: 'content',
-  DynamicSchemeVariant.rainbow: 'rainbow',
-  DynamicSchemeVariant.fruitSalad: 'fruitSalad',
+const _$ColorStyleEnumMap = {
+  ColorStyle.vivid: 'vivid',
+  ColorStyle.tinted: 'tinted',
+  ColorStyle.soft: 'soft',
+  ColorStyle.monochrome: 'monochrome',
+};
+
+const _$LiquidGlassModeEnumMap = {
+  LiquidGlassMode.none: 'none',
+  LiquidGlassMode.standard: 'standard',
+  LiquidGlassMode.ultra: 'ultra',
 };
 
 _Config _$ConfigFromJson(Map<String, dynamic> json) => _Config(
@@ -426,9 +437,9 @@ _Config _$ConfigFromJson(Map<String, dynamic> json) => _Config(
       : ProxiesStyleProps.fromJson(
           json['proxiesStyleProps'] as Map<String, dynamic>?,
         ),
-  windowProps: json['windowProps'] == null
+  windowProps: json['windowGeometry'] == null
       ? defaultWindowProps
-      : WindowProps.fromJson(json['windowProps'] as Map<String, dynamic>?),
+      : WindowProps.fromJson(json['windowGeometry'] as Map<String, dynamic>?),
   patchClashConfig: json['patchClashConfig'] == null
       ? defaultClashConfig
       : PatchClashConfig.fromJson(
@@ -450,7 +461,7 @@ Map<String, dynamic> _$ConfigToJson(_Config instance) => <String, dynamic>{
   'vpnProps': instance.vpnProps,
   'themeProps': instance.themeProps,
   'proxiesStyleProps': instance.proxiesStyleProps,
-  'windowProps': instance.windowProps,
+  'windowGeometry': instance.windowProps,
   'patchClashConfig': instance.patchClashConfig,
   'excludeSSIDs': instance.excludeSSIDs,
 };

@@ -3,20 +3,21 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:fl_clash/common/l10n_labels.dart';
 import 'package:fl_clash/common/request.dart';
 import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/features/form/form.dart';
-import 'package:fl_clash/icons/icons.dart';
 import 'package:fl_clash/l10n/l10n.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/pages/editor.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/views/about.dart';
 import 'package:fl_clash/views/config/rules.dart';
 import 'package:fl_clash/views/config/scripts.dart';
 import 'package:fl_clash/views/profiles/extend/standard.dart';
-import 'package:fl_clash/views/proxies/setting.dart';
+import 'package:fl_clash/views/proxies/proxies.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
@@ -140,7 +141,20 @@ void main() {
     );
   });
 
-  testWidgets('proxies setting sheet renders and switches layout type', (
+  Future<void> openProxiesMenu(WidgetTester tester) async {
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.byGlyph(AppGlyphs.more),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Finder inMenu(Finder finder) =>
+      find.descendant(of: find.byType(CommonPopupMenu), matching: finder);
+
+  testWidgets('the proxies menu picks the style from a sub menu', (
     tester,
   ) async {
     final container = _containerFor(tester);
@@ -148,44 +162,82 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const TestApp(child: Scaffold(body: ProxiesSetting())),
+        child: const TestApp(child: ProxiesView()),
       ),
     );
     await tester.pump();
+    final l10n = AppLocalizations.current;
 
-    expect(find.byType(ProxiesSetting), findsOneWidget);
-    expect(tester.takeException(), null);
+    await openProxiesMenu(tester);
+    expect(inMenu(find.text(l10n.iconStyle)), findsOneWidget);
 
-    container
-        .read(proxiesStyleSettingProvider.notifier)
-        .update((state) => state.copyWith(type: ProxiesType.list));
-    await tester.pump();
+    await tester.tap(inMenu(find.text(l10n.style)));
+    await tester.pumpAndSettle();
+    await tester.tap(inMenu(find.text(ProxiesType.tab.label)));
+    await tester.pumpAndSettle();
 
-    expect(container.read(proxiesStyleSettingProvider).type, ProxiesType.list);
+    expect(container.read(proxiesStyleSettingProvider).type, ProxiesType.tab);
+    expect(find.byType(CommonPopupMenu), findsNothing);
+
+    await openProxiesMenu(tester);
+    expect(inMenu(find.text(l10n.iconStyle)), findsNothing);
+    expect(
+      tester.getTopLeft(inMenu(find.text(l10n.scrollToSelected))).dy,
+      lessThan(tester.getTopLeft(inMenu(find.byType(Divider)).first).dy),
+    );
+    expect(
+      tester.getTopLeft(inMenu(find.byType(Divider)).first).dy,
+      lessThan(tester.getTopLeft(inMenu(find.text(l10n.style))).dy),
+    );
     expect(tester.takeException(), null);
   });
 
-  testWidgets('proxies setting sorts by delay when selected', (tester) async {
+  testWidgets('the proxies menu sorts by delay and hides timed-out proxies', (
+    tester,
+  ) async {
     final container = _containerFor(tester);
 
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const TestApp(child: Scaffold(body: ProxiesSetting())),
+        child: const TestApp(child: ProxiesView()),
       ),
     );
     await tester.pump();
+    final l10n = AppLocalizations.current;
 
-    container
-        .read(proxiesStyleSettingProvider.notifier)
-        .update((state) => state.copyWith(sortType: ProxiesSortType.delay));
-    await tester.pump();
+    await openProxiesMenu(tester);
+    await tester.tap(inMenu(find.text(l10n.sort)));
+    await tester.pumpAndSettle();
+    await tester.tap(inMenu(find.text(l10n.delay)));
+    await tester.pumpAndSettle();
 
     expect(
       container.read(proxiesStyleSettingProvider).sortType,
       ProxiesSortType.delay,
     );
-    expect(tester.takeException(), null);
+
+    await openProxiesMenu(tester);
+    expect(
+      inMenu(
+        find.descendant(
+          of: find.ancestor(
+            of: find.text(l10n.hideTimeoutProxies),
+            matching: find.byType(Row),
+          ),
+          matching: find.byGlyph(AppGlyphs.check),
+        ),
+      ),
+      findsNothing,
+    );
+    await tester.tap(inMenu(find.text(l10n.hideTimeoutProxies)));
+    await tester.pumpAndSettle();
+
+    expect(
+      container.read(proxiesStyleSettingProvider).hideTimeoutProxies,
+      isTrue,
+    );
+    expect(find.byType(CommonPopupMenu), findsNothing);
   });
 
   testWidgets('about view renders version and link sections', (tester) async {
@@ -320,7 +372,7 @@ void main() {
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Start from scratch'));
-    await settle(tester, 12);
+    await settle(tester, 22);
 
     await tester.enterText(
       find.descendant(
@@ -436,7 +488,7 @@ void main() {
     final gesture = await tester.startGesture(
       tester.getCenter(find.byType(SortHandle).first),
     );
-    await tester.pump(kPressTimeout);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
     await gesture.moveTo(
       Offset(tester.getCenter(find.byType(SortHandle).first).dx, to.dy + 100),
     );
@@ -502,6 +554,9 @@ void main() {
         profileDisabledRuleIdsProvider.overrideWith2(
           (_) => _TestProfileDisabledRuleIds(const []),
         ),
+        clashConfigProvider(
+          profile.id,
+        ).overrideWithValue(const AsyncData(ClashConfig())),
       ],
     );
 
@@ -608,6 +663,9 @@ void main() {
         profileDisabledRuleIdsProvider.overrideWith2(
           (_) => _TestProfileDisabledRuleIds(const []),
         ),
+        clashConfigProvider(
+          profile.id,
+        ).overrideWithValue(const AsyncData(ClashConfig())),
       ],
     );
 

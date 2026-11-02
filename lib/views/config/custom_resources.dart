@@ -1,11 +1,10 @@
 import 'package:fl_clash/common/common.dart';
-import 'package:fl_clash/icons/icons.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
+import 'package:fl_clash/ui/ui.dart';
 import 'package:fl_clash/views/config/filters.dart';
 import 'package:fl_clash/views/config/icon_sets.dart';
 import 'package:fl_clash/views/config/providers.dart';
 import 'package:fl_clash/views/profiles/custom/custom_proxies.dart';
-import 'package:fl_clash/widgets/list.dart';
-import 'package:fl_clash/widgets/scaffold.dart';
 import 'package:material_ui/material_ui.dart';
 
 class CustomResourcesView extends StatelessWidget {
@@ -39,10 +38,11 @@ class CustomResourcesView extends StatelessWidget {
     return BaseScaffold(
       title: appLocalizations.customProfileResources,
       body: ListView(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16,
-        ).copyWith(top: context.contentTopPadding, bottom: 16),
-        children: [generateSectionV3(items: items)],
+        padding: const EdgeInsets.symmetric(horizontal: 16).copyWith(
+          top: context.sectionsTopPadding,
+          bottom: 16 + context.bottomInset,
+        ),
+        children: [generateSection(items: items)],
       ),
     );
   }

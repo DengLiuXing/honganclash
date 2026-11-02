@@ -3,11 +3,12 @@ import 'dart:convert';
 
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
-import 'package:fl_clash/icons/icons.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/views/profiles/custom/icon.dart';
+import 'package:fl_clash/features/form/form.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,7 +34,8 @@ class _IconSetsViewState extends ConsumerState<IconSetsView> {
   }
 
   Future<void> _handleImportFromUrl() async {
-    final res = await dialogs.showNamedUrlInput(
+    final res = await showNamedUrlForm(
+      context,
       title: context.appLocalizations.importUrl,
     );
     if (res == null || !mounted) {
@@ -73,14 +75,15 @@ class _IconSetsViewState extends ConsumerState<IconSetsView> {
               : appLocalizations.emptyTip(appLocalizations.name),
         ),
       );
-      if (name != null) {
+      if (name != null && mounted) {
         ref
             .read(iconSetsProvider.notifier)
             .put(iconSet.copyWith(name: name.trim()));
       }
       return;
     }
-    final res = await dialogs.showNamedUrlInput(
+    final res = await showNamedUrlForm(
+      context,
       title: appLocalizations.options,
       label: iconSet.name,
       url: iconSet.url,
@@ -104,8 +107,10 @@ class _IconSetsViewState extends ConsumerState<IconSetsView> {
     final res = await dialogs.showMessage(
       title: appLocalizations.tip,
       message: TextSpan(text: appLocalizations.deleteTip(iconSet.name)),
+      destructive: true,
+      confirmText: appLocalizations.delete,
     );
-    if (res == true) {
+    if (res == true && mounted) {
       ref.read(iconSetsProvider.notifier).del(iconSet.id);
     }
   }
@@ -192,9 +197,10 @@ class _IconSetsViewState extends ConsumerState<IconSetsView> {
         illustration: NullStatusIllustration.icons,
       ),
       child: ReorderableListView.builder(
-        padding: const EdgeInsets.all(
-          16,
-        ).copyWith(top: context.contentTopPadding),
+        padding: const EdgeInsets.all(16).copyWith(
+          top: context.contentTopPadding,
+          bottom: 16 + context.bottomInset,
+        ),
         buildDefaultDragHandles: false,
         itemCount: iconSets.length,
         itemBuilder: (_, index) => _buildItem(iconSets, index),
@@ -223,10 +229,7 @@ class _IconSetsViewState extends ConsumerState<IconSetsView> {
           targetBuilder: (open) {
             return IconButton(
               tooltip: appLocalizations.add,
-              onPressed: () {
-                final isMobile = ref.read(isMobileViewProvider);
-                open(offset: Offset(0, isMobile ? 0 : 20));
-              },
+              onPressed: open,
               icon: const GlyphIcon(AppGlyphs.addCircle),
             );
           },
@@ -303,7 +306,7 @@ class _IconSetPreviewViewState extends ConsumerState<_IconSetPreviewView> {
               ),
               SliverIconGrid(icons: icons),
               SliverToBoxAdapter(
-                child: SizedBox(height: 20 + BottomInsetScope.of(context)),
+                child: SizedBox(height: 20 + context.bottomInset),
               ),
             ],
           ),

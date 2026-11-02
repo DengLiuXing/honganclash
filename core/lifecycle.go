@@ -31,6 +31,7 @@ func handleInitClash(params *InitParams) bool {
 	sdkVersion.Store(int32(params.Version))
 	constant.SetHomeDir(params.HomeDir)
 	initOwnership(params.HomeDir)
+	clearSpilledResponses()
 	isInit.Store(true)
 	return true
 }
@@ -45,7 +46,9 @@ func handleStartListener() bool {
 	isRunning.Store(true)
 	updateListeners(currentConfig)
 	resolver.ResetConnection()
-	refreshRoute()
+	// A probe already out left before the TUN routes and over the DNS
+	// connections just dropped, so its answer must not stand for this route.
+	bumpRouteEpoch()
 	return true
 }
 

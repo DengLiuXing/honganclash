@@ -275,6 +275,7 @@ func StartTun(callbacks TunCallbacks, fd int, stack, address, dns, options strin
 		handleStartListener()
 	} else {
 		handleResetConnections()
+		bumpRouteEpoch()
 	}
 	return true
 }
@@ -374,9 +375,19 @@ func StopListener() {
 	}
 }
 
+var forceGCPending atomic.Bool
+
+// Android calls this from onLowMemory and onTrimMemory on the main thread, which
+// the Flutter UI shares, and a full collection of a large profile spans frames.
 func ForceGC() {
 	defer recoverExport("forceGC")
-	handleForceGC()
+	if !forceGCPending.CompareAndSwap(false, true) {
+		return
+	}
+	safeGo("forceGC", func() {
+		defer forceGCPending.Store(false)
+		handleForceGC()
+	})
 }
 
 func UpdateDns(value string) {

@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:fl_clash/common/common.dart';
-import 'package:fl_clash/icons/icons.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -82,6 +82,36 @@ Future<List<String>> _pump(
   return pressed;
 }
 
+/// A row whose sync withdraws its menu, as a row does while its item updates,
+/// rebuilding the app above the navigator with it.
+Future<ValueNotifier<bool>> _pumpSyncing(WidgetTester tester) async {
+  final syncing = ValueNotifier(false);
+  addTearDown(syncing.dispose);
+  await tester.pumpWidget(
+    ValueListenableBuilder(
+      valueListenable: syncing,
+      builder: (_, value, _) => TestApp(
+        child: Scaffold(
+          body: ContextMenuRegion(
+            menuItems: value
+                ? null
+                : [
+                    CommonPopupMenuItem(
+                      glyph: AppGlyphs.sync,
+                      label: 'Sync',
+                      onPressed: () => syncing.value = true,
+                    ),
+                  ],
+            child: const DecorationListItem(title: Text('a')),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return syncing;
+}
+
 List<String> _order(WidgetTester tester, List<String> items) =>
     [...items]..sort(
       (a, b) => tester
@@ -118,6 +148,30 @@ void main() {
 
     expect(find.text('Delete a'), findsOneWidget);
     expect(pressed, isEmpty);
+  });
+
+  testWidgets('an item that withdraws the menu lets the menu close', (
+    tester,
+  ) async {
+    await _pumpSyncing(tester);
+    await _rightClick(tester, 'a');
+
+    await tester.tap(find.text('Sync'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sync'), findsNothing);
+  });
+
+  testWidgets('a row that withdraws its menu closes the open one', (
+    tester,
+  ) async {
+    final syncing = await _pumpSyncing(tester);
+    await _rightClick(tester, 'a');
+
+    syncing.value = true;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sync'), findsNothing);
   });
 
   testWidgets('a mouse long press opens nothing', (tester) async {
@@ -157,26 +211,38 @@ void main() {
     expect(find.text('Delete a'), findsNothing);
   });
 
-  testWidgets('a handle drags its row without waiting for a long press', (
-    tester,
-  ) async {
+  testWidgets('a sorting row drags on a long press anywhere on it, its '
+      'handle included, and not on a plain press', (tester) async {
     await _pump(tester, sorting: true);
     final rowHeight =
         tester.getTopLeft(find.text('b')).dy -
         tester.getTopLeft(find.text('a')).dy;
-
-    final gesture = await tester.startGesture(
-      tester.getCenter(find.byType(SortHandle).first),
-    );
-    await tester.pump(kPressTimeout);
-    for (var step = 0; step < 4; step++) {
-      await gesture.moveBy(Offset(0, rowHeight * 2 / 4 + 4));
-      await tester.pump(const Duration(milliseconds: 50));
+    Future<void> dragDown(Offset from, {required bool hold}) async {
+      final gesture = await tester.startGesture(from);
+      await tester.pump(
+        hold
+            ? kLongPressTimeout + const Duration(milliseconds: 50)
+            : kPressTimeout,
+      );
+      for (var step = 0; step < 4; step++) {
+        await gesture.moveBy(Offset(0, rowHeight * 2 / 4 + 4));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
     }
-    await gesture.up();
-    await tester.pumpAndSettle();
 
+    await dragDown(
+      tester.getCenter(find.byType(SortHandle).first),
+      hold: false,
+    );
+    expect(_order(tester, ['a', 'b', 'c']), ['a', 'b', 'c']);
+
+    await dragDown(tester.getCenter(find.text('a')), hold: true);
     expect(_order(tester, ['a', 'b', 'c']), ['b', 'c', 'a']);
+
+    await dragDown(tester.getCenter(find.byType(SortHandle).first), hold: true);
+    expect(_order(tester, ['a', 'b', 'c']), ['c', 'a', 'b']);
   });
 
   testWidgets(

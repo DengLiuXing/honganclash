@@ -1,11 +1,8 @@
 import 'package:fl_clash/common/common.dart';
-import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/features/features.dart';
-import 'package:fl_clash/icons/icons.dart';
 import 'package:fl_clash/models/clash_config.dart';
-import 'package:fl_clash/models/common.dart';
-import 'package:fl_clash/models/state.dart';
 import 'package:fl_clash/providers/providers.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,8 +32,9 @@ class _AddedRulesViewState extends ConsumerState<AddedRulesView> {
   }
 
   Future<void> _handleAddOrUpdate([Rule? rule]) async {
-    final res = await dialogs.showCommonDialog<Rule>(
-      child: AddOrEditRuleDialog(rule: rule),
+    final res = await showFormSheet<Rule>(
+      context: context,
+      builder: (_) => RuleForm(rule: rule),
     );
     if (res == null || !mounted) {
       return;
@@ -47,8 +45,9 @@ class _AddedRulesViewState extends ConsumerState<AddedRulesView> {
   void _handleQuickActions() {
     showSheet<void>(
       context: context,
-      builder: (_) =>
-          RulePresetSheet(onAdd: ref.read(globalRulesProvider.notifier).putAll),
+      builder: (_) => RulePresetSheet(
+        onAdd: (rules) => ref.read(globalRulesProvider.notifier).putAll(rules),
+      ),
     );
   }
 
@@ -76,6 +75,8 @@ class _AddedRulesViewState extends ConsumerState<AddedRulesView> {
       message: TextSpan(
         text: appLocalizations.deleteMultipTip(appLocalizations.rule),
       ),
+      destructive: true,
+      confirmText: appLocalizations.delete,
     );
     if (res != true || !mounted) {
       return;
@@ -111,15 +112,12 @@ class _AddedRulesViewState extends ConsumerState<AddedRulesView> {
       ),
     ];
     return CommonPopScope(
-      onPop: (_) {
-        if (selectedRules.isNotEmpty) {
-          ref.read(itemsProvider(_key).notifier).value = {};
-          return false;
-        }
-        Navigator.of(context).pop();
-        return false;
-      },
-
+      onPop: isSelecting
+          ? (_) {
+              ref.read(itemsProvider(_key).notifier).value = {};
+              return false;
+            }
+          : null,
       child: CommonScaffold(
         title: appLocalizations.addedRules,
         searchState: AppBarSearchState(onSearch: _handleSearch),
@@ -134,7 +132,7 @@ class _AddedRulesViewState extends ConsumerState<AddedRulesView> {
         iconActions: [
           if (!isSelecting)
             IconButtonData(
-              glyph: AppGlyphs.bolt,
+              glyph: AppGlyphs.rulePresets,
               onPressed: _handleQuickActions,
               tooltip: appLocalizations.quickActions,
             ),
@@ -173,7 +171,9 @@ class _AddedRulesViewState extends ConsumerState<AddedRulesView> {
                         ),
                     itemExtent: ruleItemHeight,
                     itemCount: rules.length,
-                    onReorderItem: ref.read(globalRulesProvider.notifier).order,
+                    onReorderItem: (oldIndex, newIndex) => ref
+                        .read(globalRulesProvider.notifier)
+                        .order(oldIndex, newIndex),
                   ),
           ),
         ),
@@ -185,7 +185,7 @@ class _AddedRulesViewState extends ConsumerState<AddedRulesView> {
     16,
     context.contentTopPadding,
     16,
-    16 + BottomInsetScope.of(context),
+    16 + context.bottomInset,
   );
 
   Widget _buildRuleItem(List<Rule> rules, int index, Set<dynamic> selected) {

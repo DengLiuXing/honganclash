@@ -29,6 +29,7 @@ type MethodResponse struct {
 	ID     string       `json:"id,omitempty"`
 	Result any          `json:"result"`
 	Error  *MethodError `json:"error,omitempty"`
+	File   string       `json:"file,omitempty"`
 }
 
 var methodCallSeq atomic.Uint64
@@ -75,7 +76,7 @@ func handleMethodCall(call *MethodCall) (data []byte) {
 	if err != nil {
 		return encodeResponse(MethodResponse{ID: call.ID, Error: asMethodError(err)})
 	}
-	return encodeResponse(MethodResponse{ID: call.ID, Result: result})
+	return spillResponse(call.ID, encodeResponse(MethodResponse{ID: call.ID, Result: result}))
 }
 
 func encodeResponse(response MethodResponse) []byte {
@@ -189,6 +190,10 @@ var methodHandlers = map[CoreMethod]methodHandler{
 	validateConfigMethod:           withMessage(handleValidateConfig),
 	decryptConfigMethod:            withFallible(handleDecryptConfig),
 	getConfigMethod:                withFallible(handleGetConfig),
+	getProfileBaseMethod:           withFallible(handleGetProfileBase),
+	getProfileOutboundsMethod:      withFallible(handleGetProfileOutbounds),
+	getProxyDefinitionMethod:       withFallible(handleGetProxyDefinition),
+	buildProfileMethod:             withFallible(handleBuildProfile),
 	setupConfigMethod:              withMessage(handleSetupConfig),
 	updateConfigMethod:             withMessage(updateConfig),
 	validateProxiesMethod:          withArguments(handleValidateProxies),
@@ -200,6 +205,7 @@ var methodHandlers = map[CoreMethod]methodHandler{
 	changeProxyMethod:              withArguments(handleChangeProxy),
 	asyncTestDelayMethod:           withArguments(handleTestDelay),
 	watchRouteMethod:               watchRouteHandler,
+	checkRoutesMethod:              withArguments(handleCheckRoutes),
 	probeMethod:                    withArguments(handleProbe),
 	outboundIpMethod:               withArguments(handleOutboundIp),
 	serviceCheckMethod:             withArguments(handleServiceCheck),
@@ -210,6 +216,7 @@ var methodHandlers = map[CoreMethod]methodHandler{
 	getConnectionCountMethod:       withoutArguments(handleGetConnectionCount),
 	closeConnectionsMethod:         withoutArguments(handleCloseConnections),
 	resetConnectionsMethod:         withoutArguments(handleResetConnections),
+	clearDnsCacheMethod:            acknowledged(handleClearDnsCache),
 	closeConnectionMethod:          withArguments(handleCloseConnection),
 	getExternalProvidersMethod:     withoutArguments(handleGetExternalProviders),
 	getExternalProviderMethod:      withArguments(handleGetExternalProvider),

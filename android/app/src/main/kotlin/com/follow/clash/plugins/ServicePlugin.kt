@@ -4,10 +4,13 @@ import com.follow.clash.ServiceController
 import com.follow.clash.ServiceState
 import com.follow.clash.common.Components
 import com.follow.clash.models.SharedState
+import com.follow.clash.service.NetworkObserver
 import com.google.gson.Gson
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,32 +18,39 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+    private lateinit var messenger: BinaryMessenger
     private lateinit var channel: MethodChannel
+    private lateinit var coreChannel: MethodChannel
     private lateinit var scope: CoroutineScope
     private val gson = Gson()
     private var commandRevision = 0
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        channel = MethodChannel(binding.binaryMessenger, "${Components.PACKAGE_NAME}/service")
+        messenger = binding.binaryMessenger
+        channel = MethodChannel(messenger, SERVICE_CHANNEL)
         channel.setMethodCallHandler(this)
+        // Serial: watchRoute keeps the latest intent by the order calls reach the Core.
+        coreChannel = MethodChannel(
+            messenger,
+            CORE_CHANNEL,
+            StandardMethodCodec.INSTANCE,
+            messenger.makeBackgroundTaskQueue(),
+        )
+        coreChannel.setMethodCallHandler(::onCoreMethodCall)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        coreChannel.setMethodCallHandler(null)
         scope.cancel()
         ServiceController.setEventListener(null)
     }
 
-    override fun onMethodCall(call: MethodCall, rawResult: MethodChannel.Result) {
-        // Most handlers below reply from a scope worker on Dispatchers.Default,
-        // but a MethodChannel.Result has to be answered on the platform thread.
-        // Wrapping once here covers every branch, including notImplemented.
-        val result = MainThreadResult(rawResult)
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "init" -> initialize(result)
             "shutdown" -> shutdown(result)
-            "invokeMethod" -> invokeMethod(call, result)
             "getRunTime" -> getRunTime(result)
             "syncState" -> syncState(call, result)
             "start" -> start(call, result)
@@ -49,7 +59,15 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
+    private fun onCoreMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "invokeMethod" -> invokeMethod(call, result)
+            else -> result.notImplemented()
+        }
+    }
+
     private fun initialize(result: MethodChannel.Result) {
+        NetworkObserver.start()
         ServiceController.setEventListener(::sendEvent)
             .onSuccess { result.success("") }
             .onFailure { error -> result.success(error.message.orEmpty()) }
@@ -66,9 +84,6 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             result.error("INVALID_ARGUMENT", "Method call payload must be a string", null)
             return
         }
-        // Inline rather than a coroutine per call, which could swap two: watchRoute
-        // keeps the latest intent by the order calls reach the Core
-        // (dispatchMethodCall in core/method.go), and this only hands data over.
         ServiceController.invokeMethod(data) { response ->
             result.success(response)
         }.onFailure { error ->
@@ -118,9 +133,15 @@ class ServicePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun sendEvent(value: String?) {
+    private fun sendEvent(value: ByteArray) {
+        val message = StandardMethodCodec.INSTANCE.encodeMethodCall(MethodCall("event", value))
         scope.launch(Dispatchers.Main) {
-            channel.invokeMethod("event", value)
+            messenger.send(SERVICE_CHANNEL, message)
         }
+    }
+
+    private companion object {
+        val SERVICE_CHANNEL = "${Components.PACKAGE_NAME}/service"
+        val CORE_CHANNEL = "${Components.PACKAGE_NAME}/core"
     }
 }

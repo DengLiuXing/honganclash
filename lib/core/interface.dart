@@ -38,11 +38,19 @@ mixin CoreInterface {
 
   Future<Map<String, dynamic>> getConfig(String path);
 
+  Future<ProfileBase> getProfileBase(String path);
+
+  Future<Map<String, dynamic>> getProfileOutbounds(String path);
+
+  Future<Map<String, dynamic>?> getProxyDefinition(String name);
+
+  Future<String> buildProfile(SetupBase base);
+
   Future<String> dumpRuleSet(String path);
 
   Future<RuleSetInfo> compileRuleSet(String name, {String url = ''});
 
-  Future<Delay?> asyncTestDelay(String url, String proxyName);
+  Future<Delay?> asyncTestDelay(String url, String proxyName, Duration timeout);
 
   Future<ProbeResult?> probe(ProbeParams params);
 
@@ -59,6 +67,8 @@ mixin CoreInterface {
   Future<ChangeProxyResult> changeProxy(ChangeProxyParams changeProxyParams);
 
   Future<RouteSnapshot?> watchRoute(bool watch);
+
+  Future<RouteCheck?> checkRoutes(CheckRoutesParams params);
 
   Future<bool> startListener();
 
@@ -102,6 +112,8 @@ mixin CoreInterface {
   FutureOr<bool> closeConnections();
 
   FutureOr<bool> resetConnections();
+
+  FutureOr<bool> clearDnsCache();
 }
 
 abstract class CoreHandlerInterface with CoreInterface {
@@ -296,6 +308,59 @@ abstract class CoreHandlerInterface with CoreInterface {
   }
 
   @override
+  Future<ProfileBase> getProfileBase(String path) async {
+    final result = await _invokeMethod<Map<String, dynamic>>(
+      method: CoreMethod.getProfileBase,
+      arguments: path,
+    );
+    if (result == null) {
+      throw const CoreMethodException(
+        code: 'empty_result',
+        message: 'Core returned an empty profile base',
+      );
+    }
+    return ProfileBase.fromJson(result);
+  }
+
+  @override
+  Future<Map<String, dynamic>> getProfileOutbounds(String path) async {
+    final result = await _invokeMethod<Map<String, dynamic>>(
+      method: CoreMethod.getProfileOutbounds,
+      arguments: path,
+    );
+    if (result == null) {
+      throw const CoreMethodException(
+        code: 'empty_result',
+        message: 'Core returned no outbounds',
+      );
+    }
+    return result;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getProxyDefinition(String name) {
+    return _invokeMethod<Map<String, dynamic>>(
+      method: CoreMethod.getProxyDefinition,
+      arguments: name,
+    );
+  }
+
+  @override
+  Future<String> buildProfile(SetupBase base) async {
+    final result = await _invokeMethod<String>(
+      method: CoreMethod.buildProfile,
+      arguments: base.toJson(),
+    );
+    if (result == null || result.isEmpty) {
+      throw const CoreMethodException(
+        code: 'empty_result',
+        message: 'Core returned no built profile',
+      );
+    }
+    return result;
+  }
+
+  @override
   Future<String> setupConfig(SetupParams setupParams) async {
     return _invokeMessage(
       method: CoreMethod.setupConfig,
@@ -368,6 +433,16 @@ abstract class CoreHandlerInterface with CoreInterface {
   }
 
   @override
+  Future<RouteCheck?> checkRoutes(CheckRoutesParams params) async {
+    final data = await _invokeMethod<Map<String, dynamic>>(
+      method: CoreMethod.checkRoutes,
+      arguments: params.toJson(),
+      timeout: coreGuardFor(probeTimeoutDuration.inMilliseconds),
+    );
+    return data == null ? null : RouteCheck.fromJson(data);
+  }
+
+  @override
   Future<List<ExternalProvider>> getExternalProviders() async {
     final data = await _invokeMethod<List<dynamic>>(
       method: CoreMethod.getExternalProviders,
@@ -419,17 +494,8 @@ abstract class CoreHandlerInterface with CoreInterface {
 
   @override
   Future<List<TrackerInfo>> getConnections() async {
-    final data = await _invokeMethod<Map<String, dynamic>>(
-      method: CoreMethod.getConnections,
-    );
-    final connections = data?['connections'];
-    if (connections is! List) {
-      return [];
-    }
-    return connections
-        .whereType<Map>()
-        .map((item) => TrackerInfo.fromJson(Map<String, Object?>.from(item)))
-        .toList();
+    final data = await _invokeMethod<Object>(method: CoreMethod.getConnections);
+    return data is List<TrackerInfo> ? data : trackerInfosOf(data);
   }
 
   @override
@@ -447,6 +513,11 @@ abstract class CoreHandlerInterface with CoreInterface {
   Future<bool> resetConnections() async {
     return await _invokeMethod<bool>(method: CoreMethod.resetConnections) ??
         false;
+  }
+
+  @override
+  Future<bool> clearDnsCache() async {
+    return await _invokeMethod<bool>(method: CoreMethod.clearDnsCache) ?? false;
   }
 
   @override
@@ -514,10 +585,14 @@ abstract class CoreHandlerInterface with CoreInterface {
   }
 
   @override
-  Future<Delay?> asyncTestDelay(String url, String proxyName) async {
+  Future<Delay?> asyncTestDelay(
+    String url,
+    String proxyName,
+    Duration timeout,
+  ) async {
     final delayParams = {
       'proxy-name': proxyName,
-      'timeout': delayTestTimeoutDuration.inMilliseconds,
+      'timeout': timeout.inMilliseconds,
       'test-url': url,
     };
     final data = await _invokeMethod<Map<String, dynamic>>(

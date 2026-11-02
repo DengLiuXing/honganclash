@@ -3,13 +3,13 @@ import 'dart:io';
 
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
-import 'package:fl_clash/icons/icons.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/providers/action.dart';
 import 'package:fl_clash/providers/app.dart';
 import 'package:fl_clash/providers/config.dart';
 import 'package:fl_clash/providers/database.dart';
 import 'package:fl_clash/state.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -35,8 +35,7 @@ class ResourcesView extends ConsumerStatefulWidget {
   ConsumerState<ResourcesView> createState() => _ResourcesViewState();
 }
 
-class _ResourcesViewState extends ConsumerState<ResourcesView>
-    with RouteMotionHoldMixin<ResourcesView>, RouteSettledMixin<ResourcesView> {
+class _ResourcesViewState extends ConsumerState<ResourcesView> {
   _RemoteResources? _resources;
   var _fileInfos = const <String, FileInfo?>{};
 
@@ -46,10 +45,8 @@ class _ResourcesViewState extends ConsumerState<ResourcesView>
     ref.listenManual(iconSetsProvider, (_, _) => _refreshResources());
     ref.listenManual(clashProvidersProvider, (_, _) => _refreshResources());
     ref.listenManual(scriptsProvider, (_, _) => _refreshResources());
+    unawaited(_load());
   }
-
-  @override
-  void didSettleRoute() => unawaited(_load());
 
   Future<void> _load() async {
     await Future.wait<Object>([
@@ -101,7 +98,7 @@ class _ResourcesViewState extends ConsumerState<ResourcesView>
     if (_resources == null) {
       return;
     }
-    updateWhenRouteSettled(() => setState(() => _resources = _readResources()));
+    setState(() => _resources = _readResources());
   }
 
   Future<void> _updateAll() async {
@@ -120,6 +117,9 @@ class _ResourcesViewState extends ConsumerState<ResourcesView>
         value: updateInterval.toString(),
         suffixText: appLocalizations.hours,
         keyboardType: TextInputType.number,
+        inputFormatters: TextInputLimits.digitsOnly(
+          TextInputLimits.geoUpdateInterval,
+        ),
         validator: (value) {
           if (value == null || value.isEmpty) {
             return appLocalizations.emptyTip(
@@ -140,7 +140,7 @@ class _ResourcesViewState extends ConsumerState<ResourcesView>
       ),
     );
     final interval = int.tryParse(value ?? '');
-    if (interval == null || interval <= 0) {
+    if (interval == null || interval <= 0 || !mounted) {
       return;
     }
     ref
@@ -159,6 +159,9 @@ class _ResourcesViewState extends ConsumerState<ResourcesView>
     final appLocalizations = context.appLocalizations;
     final autoUpdate = ref.watch(
       patchClashConfigProvider.select((state) => state.geoAutoUpdate),
+    );
+    final updateInterval = ref.watch(
+      patchClashConfigProvider.select((state) => state.geoUpdateInterval),
     );
     final resources = _resources;
     final (:iconSets, :ruleProviders, :scripts) = resources ?? _noResources;
@@ -182,53 +185,47 @@ class _ResourcesViewState extends ConsumerState<ResourcesView>
           onPressed: _updateAll,
         ),
       ],
-      menuItems: [
-        CommonPopupMenuItem(
-          glyph: AppGlyphs.toggle,
-          label: appLocalizations.autoUpdate,
-          subItems: [
-            CommonPopupMenuItem(
-              label: appLocalizations.turnOn,
-              checked: autoUpdate,
-              onPressed: () => _updateAutoUpdate(true),
-            ),
-            CommonPopupMenuItem(
-              label: appLocalizations.turnOff,
-              checked: !autoUpdate,
-              onPressed: () => _updateAutoUpdate(false),
-            ),
-          ],
-        ),
-        CommonPopupMenuItem(
-          glyph: AppGlyphs.clock,
-          label: appLocalizations.resourceUpdateInterval,
-          onPressed: _updateInterval,
-        ),
-      ],
       body: NullStatusSwitcher(
-        isEmpty: resources == null,
-        holdsArrival: true,
-        nullStatus: const NullStatus(illustration: NullStatusIllustration.data),
+        isLoading: resources == null,
+        loadingStatus: const NullStatus(
+          illustration: NullStatusIllustration.data,
+        ),
         child: ListView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 16,
-          ).copyWith(top: context.appBarInset, bottom: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16).copyWith(
+            top: context.sectionsTopPadding,
+            bottom: 16 + context.bottomInset,
+          ),
           children: [
-            generateSectionV3(
+            generateSection(
+              items: [
+                ListItem.toggle(
+                  title: Text(appLocalizations.autoUpdate),
+                  value: autoUpdate,
+                  onChanged: _updateAutoUpdate,
+                ),
+                if (autoUpdate)
+                  ListItem(
+                    title: Text(appLocalizations.resourceUpdateInterval),
+                    subtitle: Text('$updateInterval ${appLocalizations.hours}'),
+                    onTap: _updateInterval,
+                  ),
+              ],
+            ),
+            generateSection(
               title: appLocalizations.geoResources,
               items: [
                 for (final geoResource in GeoResource.values)
                   _GeoResourceItem(geoResource, preloaded: _fileInfos),
               ],
             ),
-            generateSectionV3(
+            generateSection(
               title: appLocalizations.iconSets,
               items: [
                 for (final iconSet in iconSets)
                   _IconSetItem(iconSet, key: ValueKey(iconSet.id)),
               ],
             ),
-            generateSectionV3(
+            generateSection(
               title: appLocalizations.ruleProviders,
               items: [
                 for (final provider in ruleProviders)
@@ -239,7 +236,7 @@ class _ResourcesViewState extends ConsumerState<ResourcesView>
                   ),
               ],
             ),
-            generateSectionV3(
+            generateSection(
               title: appLocalizations.script,
               items: [
                 for (final script in scripts)
@@ -327,21 +324,14 @@ class _ResourceItem extends StatelessWidget {
         children: [...previousChildren, ?currentChild],
       ),
       child: isUpdating
-          ? const SizedBox.square(
-              key: ValueKey('updating'),
-              dimension: 24,
-              child: Padding(
-                padding: EdgeInsets.all(2),
-                child: CommonCircleLoading(),
-              ),
-            )
+          ? const CommonCircleLoading(key: ValueKey('updating'), size: 24)
           : chip == null
           ? const SizedBox.shrink()
           : TonalChip(
               key: const ValueKey('chip'),
               label: chip,
-              color: colorScheme.secondaryContainer,
-              foregroundColor: colorScheme.onSecondaryContainer,
+              color: context.raisedSurfaceLevel.colorOf(colorScheme),
+              foregroundColor: colorScheme.onSurfaceVariant,
             ),
     );
   }
@@ -466,7 +456,7 @@ class _GeoResourceItem extends ConsumerWidget {
             .updateGeoResourceUrl(type, newUrl);
       } catch (e) {
         unawaited(
-          dialogs.showMessage(
+          dialogs.showAlert(
             title: type.name,
             message: TextSpan(text: e.toString()),
           ),

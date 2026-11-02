@@ -4,13 +4,13 @@ import 'dart:io';
 
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
-import 'package:fl_clash/icons/icons.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/pages/editor.dart';
 import 'package:fl_clash/providers/action.dart';
 import 'package:fl_clash/providers/app.dart';
 import 'package:fl_clash/providers/database.dart';
 import 'package:fl_clash/state.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:collection/collection.dart';
 import 'package:material_ui/material_ui.dart';
@@ -39,6 +39,8 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
       message: TextSpan(
         text: appLocalizations.deleteTip(appLocalizations.script),
       ),
+      destructive: true,
+      confirmText: appLocalizations.delete,
     );
     if (res != true || !mounted) {
       return;
@@ -62,9 +64,10 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
         label: appLocalizations.nullTip(appLocalizations.script),
       ),
       child: ReorderableListView.builder(
-        padding: const EdgeInsets.all(
-          16,
-        ).copyWith(top: context.contentTopPadding),
+        padding: const EdgeInsets.all(16).copyWith(
+          top: context.contentTopPadding,
+          bottom: 16 + context.bottomInset,
+        ),
         buildDefaultDragHandles: false,
         itemCount: scripts.length,
         itemBuilder: (_, index) => _buildItem(scripts, index),
@@ -203,7 +206,7 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
   Future<void> _handleEditorSave(
     BuildContext _,
     String title,
-    String content, {
+    EditorContent content, {
     Script? script,
   }) async {
     final appLocalizations = context.appLocalizations;
@@ -217,7 +220,7 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
     }
     if (_scripts.hasLabel(label, except: script)) {
       unawaited(
-        dialogs.showMessage(
+        dialogs.showAlert(
           message: TextSpan(
             text: appLocalizations.existsTip(appLocalizations.name),
           ),
@@ -227,7 +230,7 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
     }
     final newScript =
         await (script?.copyWith(label: label) ?? Script.create(label: label))
-            .save(content);
+            .save(await content.readText());
     _scriptsAction.putScript(newScript);
     if (mounted) {
       Navigator.of(context).pop();
@@ -237,17 +240,10 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
   Future<bool> _handleEditorPop(
     BuildContext _,
     String title,
-    String content,
-    String raw, {
+    EditorContent content, {
     Script? script,
   }) async {
-    final appLocalizations = context.appLocalizations;
-    if (content == raw && title == (script?.label ?? '')) {
-      return true;
-    }
-    final res = await dialogs.showMessage(
-      message: TextSpan(text: appLocalizations.saveChanges),
-    );
+    final res = await dialogs.showSaveChanges();
     if (res == null) {
       return false;
     }
@@ -260,7 +256,6 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
   }
 
   void _handleToEditor([Script? script]) {
-    late final String raw;
     unawaited(
       BaseNavigator.push(
         context,
@@ -270,16 +265,12 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
           onSave: (context, title, content) =>
               _handleEditorSave(context, title, content, script: script),
           onPop: (context, title, content) {
-            return _handleEditorPop(
-              context,
-              title,
-              content,
-              raw,
-              script: script,
-            );
+            return _handleEditorPop(context, title, content, script: script);
           },
           language: Language.javaScript,
-          load: () async => raw = (await script?.content) ?? scriptTemplate,
+          load: () async => script == null
+              ? CodeForgeDocument.fromText(scriptTemplate)
+              : openEditorFile(await script.path, ifMissing: scriptTemplate),
         ),
       ),
     );
@@ -348,10 +339,7 @@ class _ScriptsViewState extends ConsumerState<ScriptsView> {
           targetBuilder: (open) {
             return IconButton(
               tooltip: appLocalizations.add,
-              onPressed: () {
-                final isMobile = ref.read(isMobileViewProvider);
-                open(offset: Offset(0, isMobile ? 0 : 20));
-              },
+              onPressed: open,
               icon: const GlyphIcon(AppGlyphs.addCircle),
             );
           },
@@ -400,11 +388,7 @@ class _ScriptTrailing extends ConsumerWidget {
           children: [...previous, ?current],
         ),
         child: isUpdating
-            ? const SizedBox.square(
-                key: ValueKey('loading'),
-                dimension: 24,
-                child: CommonCircleLoading(),
-              )
+            ? const CommonCircleLoading(key: ValueKey('loading'), size: 24)
             : LastUpdateTimeText(
                 key: const ValueKey('time'),
                 lastUpdateDate: script.lastUpdateTime,

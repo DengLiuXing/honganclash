@@ -62,6 +62,31 @@ class Requests extends _$Requests with AutoDisposeNotifierMixin {
     }
     this.value = state.append(value);
   }
+
+  void updateTraffic(Map<String, RequestTraffic> traffic) {
+    if (!ref.mounted) {
+      return;
+    }
+    final pending = Map.of(traffic);
+    final updated = <int, TrackerInfo>{};
+    for (
+      var index = state.length - 1;
+      index >= 0 && pending.isNotEmpty;
+      index--
+    ) {
+      final request = state[index];
+      final item = pending.remove(request.id);
+      if (item != null) {
+        updated[index] = request.copyWith(
+          upload: item.upload,
+          download: item.download,
+        );
+      }
+    }
+    if (updated.isNotEmpty) {
+      value = state.replace(updated);
+    }
+  }
 }
 
 @Riverpod(keepAlive: true)
@@ -220,12 +245,13 @@ class SideWidth extends _$SideWidth with AutoDisposeNotifierMixin {
   }
 }
 
-/// Whether the native window currently draws a backdrop behind the content.
+/// The opacity the sidebar keeps its own color at over the backdrop the native
+/// window draws behind the content, or null while it draws none.
 @Riverpod(keepAlive: true)
 class WindowBlur extends _$WindowBlur with AutoDisposeNotifierMixin {
   @override
-  bool build() {
-    return false;
+  double? build() {
+    return null;
   }
 }
 
@@ -538,14 +564,6 @@ class Items extends _$Items with AutoDisposeNotifierMixin {
   @override
   Set<dynamic> build(String key) {
     return {};
-  }
-}
-
-@riverpod
-class Item extends _$Item with AutoDisposeNotifierMixin {
-  @override
-  dynamic build(String key) {
-    return null;
   }
 }
 

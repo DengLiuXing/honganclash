@@ -3,14 +3,11 @@ import 'dart:math';
 
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
-import 'package:fl_clash/icons/icons.dart';
+import 'package:fl_clash/manager/theme_manager.dart';
 import 'package:fl_clash/plugins/app.dart';
-import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
-import 'package:fl_clash/widgets/activate_box.dart';
-import 'package:fl_clash/widgets/navigation_dock.dart';
-import 'package:fl_clash/widgets/null_status.dart';
-import 'package:fl_clash/widgets/scaffold.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
+import 'package:fl_clash/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +25,13 @@ const _systemUiOverlayStyle = SystemUiOverlayStyle(
 
 const _invalidHintDuration = Duration(seconds: 2);
 
+const _previewRevealDuration = Duration(milliseconds: 600);
+const _previewRevealAwaitingFirstFrame = Interval(
+  0.4,
+  1,
+  curve: Curves.easeOut,
+);
+
 class ScanPage extends ConsumerStatefulWidget {
   const ScanPage({super.key});
 
@@ -36,7 +40,10 @@ class ScanPage extends ConsumerStatefulWidget {
 }
 
 class _ScanPageState extends ConsumerState<ScanPage>
-    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+    with
+        WidgetsBindingObserver,
+        SingleTickerProviderStateMixin,
+        RouteSettledMixin<ScanPage> {
   final _controller = MobileScannerController(
     autoStart: false,
     detectionSpeed: DetectionSpeed.noDuplicates,
@@ -52,8 +59,10 @@ class _ScanPageState extends ConsumerState<ScanPage>
 
   StreamSubscription<BarcodeCapture>? _subscription;
   Timer? _invalidHintTimer;
+  Future<void>? _starting;
   bool _disableAnimations = false;
-  bool _completed = false;
+  bool _leaving = false;
+  bool _holdsLastFrame = false;
   bool _picking = false;
   bool _restartAfterSettings = false;
 
@@ -66,7 +75,6 @@ class _ScanPageState extends ConsumerState<ScanPage>
       _handleCapture,
       onError: _handleDetectError,
     );
-    unawaited(_start());
   }
 
   @override
@@ -76,9 +84,19 @@ class _ScanPageState extends ConsumerState<ScanPage>
     _syncEffect();
   }
 
+  // Android binds and unbinds the camera on the platform thread, which the UI
+  // shares, so the camera runs only between the route's transitions.
+  @override
+  void didSettleRoute() {
+    unawaited(_start());
+  }
+
   void _syncEffect() {
-    if (_disableAnimations || _controller.value.error != null) {
-      _effectController.stop();
+    if (_leaving) {
+      return;
+    }
+    if (_disableAnimations || !_controller.value.isRunning) {
+      _effectController.reset();
     } else if (!_effectController.isAnimating) {
       _effectController.repeat();
     }
@@ -88,11 +106,12 @@ class _ScanPageState extends ConsumerState<ScanPage>
   // the first start is still pending, and a second `start` would throw.
   Future<void> _start() async {
     final state = _controller.value;
-    if (_completed || state.isStarting || state.isRunning) {
+    if (_leaving || !routeSettled || state.isStarting || state.isRunning) {
       return;
     }
+    final starting = _starting = _controller.start();
     try {
-      await _controller.start();
+      await starting;
     } on MobileScannerException catch (error) {
       if (mounted) {
         commonPrint.log(
@@ -100,11 +119,41 @@ class _ScanPageState extends ConsumerState<ScanPage>
           logLevel: LogLevel.warning,
         );
       }
+    } finally {
+      if (identical(_starting, starting)) {
+        _starting = null;
+      }
     }
   }
 
+  // Pausing, unlike stopping, keeps the preview's last frame.
+  Future<void> _release() async {
+    _leaving = true;
+    _effectController.stop();
+    unawaited(_subscription?.cancel());
+    _subscription = null;
+    await _starting;
+    _holdsLastFrame = _controller.value.isRunning;
+    try {
+      await _controller.pause();
+    } on Exception catch (error) {
+      commonPrint.log(
+        'Failed to pause the scanner: ${compactError(error)}',
+        logLevel: LogLevel.warning,
+      );
+    }
+  }
+
+  Future<bool> _handlePop(BuildContext context) async {
+    if (_leaving) {
+      return false;
+    }
+    await _release();
+    return true;
+  }
+
   void _handleCapture(BarcodeCapture capture) {
-    if (_completed || !mounted || capture.barcodes.isEmpty) {
+    if (_leaving || !mounted || capture.barcodes.isEmpty) {
       return;
     }
     final url = profileUrlFromQrCodes(
@@ -114,7 +163,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
       _showInvalidHint();
       return;
     }
-    _complete(url);
+    unawaited(_leave(url));
   }
 
   void _handleDetectError(Object error) {
@@ -134,28 +183,34 @@ class _ScanPageState extends ConsumerState<ScanPage>
 
   // `pop` takes the top route, which is another one once this page is closing
   // or a dialog covers it, and a closing page stays mounted until it is gone.
-  void _complete(String url) {
-    if (ModalRoute.isCurrentOf(context) == false) {
+  Future<void> _leave([String? url]) async {
+    if (_leaving || ModalRoute.isCurrentOf(context) == false) {
       return;
     }
-    _completed = true;
-    unawaited(_subscription?.cancel());
-    _subscription = null;
-    Navigator.of(context).pop<String>(url);
+    await _release();
+    if (mounted && ModalRoute.isCurrentOf(context) != false) {
+      Navigator.of(context).pop<String>(url);
+    }
   }
 
   Future<void> _pickFromAlbum() async {
-    if (_picking || _completed) {
+    if (_picking || _leaving) {
       return;
     }
     _picking = true;
+    final String? url;
     try {
-      final url = await globalState.safeRun(picker.pickerConfigQRCode);
-      if (url != null && mounted && !_completed) {
-        _complete(url);
-      }
+      url = await globalState.safeRun<String?>(picker.pickerConfigQRCode);
     } finally {
       _picking = false;
+    }
+    if (!mounted || _leaving) {
+      return;
+    }
+    if (url != null) {
+      await _leave(url);
+    } else {
+      await _start();
     }
   }
 
@@ -173,6 +228,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
       case AppLifecycleState.paused:
         return;
       case AppLifecycleState.resumed:
+        if (_picking) {
+          return;
+        }
         // Retrying a denied permission on every resume would reopen the
         // system dialog as soon as the user dismisses it.
         final denied =
@@ -190,90 +248,128 @@ class _ScanPageState extends ConsumerState<ScanPage>
 
   @override
   Widget build(BuildContext context) {
-    final theme = ThemeData(
-      useMaterial3: true,
-      colorScheme: ref.watch(genColorSchemeProvider(Brightness.dark)),
-    ).withAppShapes;
+    final theme = watchAppTheme(ref, Brightness.dark);
     final appLocalizations = context.appLocalizations;
+    final glass = LiquidGlassScope.of(context);
     return Theme(
       data: theme,
-      // `Theme` inserts no `IconTheme`, and `IconButton.filled` treats the
-      // app's light one as a custom color that overrides its defaults.
+      // `Theme` inserts no `IconTheme`, so the app's light one would color
+      // the icons here.
       child: IconTheme(
         data: theme.iconTheme,
         child: AnnotatedRegion<SystemUiOverlayStyle>(
           value: _systemUiOverlayStyle,
           sized: false,
-          child: Scaffold(
-            body: LayoutBuilder(
-              builder: (context, constraints) {
-                final hintStyle = Theme.of(context).textTheme.bodyMedium!;
-                final layout = _ScanLayout(
-                  size: constraints.biggest,
-                  padding: MediaQuery.paddingOf(context),
-                  hintHeight:
-                      MediaQuery.textScalerOf(
-                        context,
-                      ).scale(hintStyle.fontSize!) *
-                      hintStyle.height! *
-                      _hintMaxLines,
-                );
-                return Stack(
-                  children: [
-                    Positioned.fill(
-                      child: MobileScanner(
-                        controller: _controller,
-                        scanWindow: layout.scanWindow,
-                        errorBuilder: (_, _) => const SizedBox.shrink(),
-                      ),
-                    ),
-                    Positioned.fill(
-                      child: ValueListenableBuilder<MobileScannerState>(
-                        valueListenable: _controller,
-                        builder: (context, state, _) {
-                          final error = state.error;
-                          if (error != null) {
-                            return _ScannerError(
-                              errorCode: error.errorCode,
-                              onRetry: _start,
-                              onOpenSettings: _openAppSettings,
-                            );
-                          }
-                          return _buildScanFrame(theme, layout, hintStyle);
-                        },
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: AppBar(
-                        backgroundColor: Colors.transparent,
-                        surfaceTintColor: Colors.transparent,
-                        automaticallyImplyLeading: false,
-                        leading: IconButton(
-                          tooltip: appLocalizations.close,
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                          },
-                          icon: const GlyphIcon(AppGlyphs.close),
+          child: ValueListenableBuilder<MobileScannerState>(
+            valueListenable: _controller,
+            builder: (context, state, child) => CommonPopScope(
+              onPop: state.isRunning || state.isStarting ? _handlePop : null,
+              child: child!,
+            ),
+            child: Scaffold(
+              body: LayoutBuilder(
+                builder: (context, constraints) {
+                  final hintStyle = AppTextStyle.subheadline.of(context);
+                  final layout = _ScanLayout(
+                    size: constraints.biggest,
+                    padding: MediaQuery.paddingOf(context),
+                    hintHeight:
+                        MediaQuery.textScalerOf(
+                          context,
+                        ).scale(hintStyle.fontSize!) *
+                        hintStyle.height! *
+                        _hintMaxLines,
+                  );
+                  return Stack(
+                    children: [
+                      Positioned.fill(
+                        child: MobileScanner(
+                          controller: _controller,
+                          errorBuilder: (_, _) => const SizedBox.shrink(),
                         ),
-                        actions: genActions([
-                          IconButton(
-                            tooltip: appLocalizations.pickFromAlbum,
-                            onPressed: _pickFromAlbum,
-                            icon: const GlyphIcon(AppGlyphs.photos),
-                          ),
-                        ], edge: AppBarActionEdge.icon),
                       ),
-                    ),
-                    Positioned.fromRect(
-                      rect: layout.torch,
-                      child: _TorchButton(controller: _controller),
-                    ),
-                  ],
-                );
-              },
+                      Positioned.fill(
+                        child: ValueListenableBuilder<MobileScannerState>(
+                          valueListenable: _controller,
+                          builder: (context, state, _) => AnimatedOpacity(
+                            opacity:
+                                state.isRunning ||
+                                    state.error != null ||
+                                    _holdsLastFrame
+                                ? 0
+                                : 1,
+                            duration: _disableAnimations || !state.isRunning
+                                ? Duration.zero
+                                : _previewRevealDuration,
+                            curve: _previewRevealAwaitingFirstFrame,
+                            child: const ColoredBox(color: Colors.black),
+                          ),
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: ValueListenableBuilder<MobileScannerState>(
+                          valueListenable: _controller,
+                          builder: (context, state, _) {
+                            final error = state.error;
+                            if (error != null) {
+                              return _ScannerError(
+                                errorCode: error.errorCode,
+                                onRetry: _start,
+                                onOpenSettings: _openAppSettings,
+                              );
+                            }
+                            return _buildScanFrame(theme, layout, hintStyle);
+                          },
+                        ),
+                      ),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: TonalButtonTheme(
+                          glass: glass,
+                          child: AppBarInsetScope(
+                            child: AppBar(
+                              backgroundColor: Colors.transparent,
+                              surfaceTintColor: Colors.transparent,
+                              automaticallyImplyLeading: false,
+                              leading: Center(
+                                child: ElasticPress(
+                                  child: AppBarActionButton(
+                                    data: IconButtonData(
+                                      glyph: AppGlyphs.close,
+                                      tooltip: appLocalizations.close,
+                                      onPressed: _leave,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              actions: genActions([
+                                ElasticPress(
+                                  child: AppBarActionButton(
+                                    data: IconButtonData(
+                                      glyph: AppGlyphs.photos,
+                                      tooltip: appLocalizations.pickFromAlbum,
+                                      onPressed: _pickFromAlbum,
+                                    ),
+                                  ),
+                                ),
+                              ], edge: AppBarActionEdge.container),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned.fromRect(
+                        rect: layout.torch,
+                        child: TonalButtonTheme(
+                          glass: glass,
+                          child: _TorchButton(controller: _controller),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -364,6 +460,7 @@ const _hintGap = 24.0;
 const _hintInset = 32.0;
 const _hintMaxLines = 2;
 const _torchSize = 64.0;
+const _torchIconSize = 32.0;
 const _torchBottomMargin = 48.0;
 const _torchSideMargin = 24.0;
 const _controlGap = 16.0;
@@ -397,7 +494,7 @@ class _ScanLayout {
         size.height - max(padding.bottom, _torchBottomMargin) - _torchSize;
     final scanWindow = _fitScanWindow(
       size: size,
-      top: padding.top + kToolbarHeight,
+      top: padding.top + pageToolbarHeight,
       bottom: torchTop - _controlGap - _hintGap - hintHeight,
       maxWidth: size.width,
     );
@@ -440,7 +537,10 @@ class _ScanLayout {
     );
     final torch = Rect.fromLTWH(
       size.width - padding.right - _torchSideMargin - _torchSize,
-      max(padding.top + kToolbarHeight, scanWindow.center.dy - _torchSize / 2),
+      max(
+        padding.top + pageToolbarHeight,
+        scanWindow.center.dy - _torchSize / 2,
+      ),
       _torchSize,
       _torchSize,
     );
@@ -510,12 +610,11 @@ class _ScannerError extends StatelessWidget {
         label: appLocalizations.cameraPermissionRequired,
         description: appLocalizations.cameraPermissionDesc,
         illustration: NullStatusIllustration.permission,
-        action: ElasticButton(
-          child: FilledButton.tonalIcon(
-            onPressed: onOpenSettings,
-            icon: const GlyphIcon(AppGlyphs.settings, fill: 1),
-            label: Text(appLocalizations.settings),
-          ),
+        action: TonalButton(
+          size: TonalButtonSize.bar,
+          glyph: AppGlyphs.settings,
+          label: appLocalizations.settings,
+          onPressed: onOpenSettings,
         ),
       ),
       MobileScannerErrorCode.unsupported => NullStatus(
@@ -525,18 +624,17 @@ class _ScannerError extends StatelessWidget {
       _ => NullStatus(
         label: appLocalizations.cameraUnavailable,
         illustration: NullStatusIllustration.camera,
-        action: ElasticButton(
-          child: FilledButton.tonalIcon(
-            onPressed: onRetry,
-            icon: const GlyphIcon(AppGlyphs.refresh, fill: 1),
-            label: Text(appLocalizations.retry),
-          ),
+        action: TonalButton(
+          size: TonalButtonSize.bar,
+          glyph: AppGlyphs.refresh,
+          label: appLocalizations.retry,
+          onPressed: onRetry,
         ),
       ),
     };
     final padding =
         MediaQuery.paddingOf(context) +
-        const EdgeInsets.only(top: kToolbarHeight);
+        const EdgeInsets.only(top: pageToolbarHeight);
     // `NullStatus` wraps into a second column once its height is bounded
     // below its content, so a short viewport scrolls it instead.
     return LayoutBuilder(
@@ -560,6 +658,8 @@ class _TorchButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = context.colorScheme;
+    final glass = TonalButtonTheme.glassOf(context);
     return ValueListenableBuilder<MobileScannerState>(
       valueListenable: controller,
       builder: (context, state, _) {
@@ -572,19 +672,22 @@ class _TorchButton extends StatelessWidget {
           child: AnimatedOpacity(
             opacity: available ? 1 : 0,
             duration: kThemeAnimationDuration,
-            child: ElasticButton(
-              child: IconButton.filled(
+            child: ElasticPress(
+              child: IconButton(
                 tooltip: context.appLocalizations.torch,
                 isSelected: lit,
-                iconSize: 32,
-                style: IconButton.styleFrom(fixedSize: const Size.square(64)),
+                style: IconButton.styleFrom(
+                  fixedSize: const Size.square(_torchSize),
+                  iconSize: _torchIconSize,
+                  backgroundColor: lit && !glass ? colorScheme.primary : null,
+                  foregroundColor: lit ? colorScheme.onPrimary : null,
+                ).merge(focusRingStyle(colorScheme, standsOff: lit && !glass)),
                 onPressed: controller.toggleTorch,
-                icon: const GlyphIcon(AppGlyphs.torchOff, fill: 1),
+                icon: const GlyphIcon(AppGlyphs.torchOff),
                 selectedIcon: GlyphIcon(
                   torchState == TorchState.auto
                       ? AppGlyphs.torchAuto
                       : AppGlyphs.torch,
-                  fill: 1,
                 ),
               ),
             ),
@@ -608,27 +711,16 @@ class ScannerOverlay extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final backgroundPath = Path()..addRect(Rect.largest);
-
-    final cutoutPath = Path()
+    final backgroundWithCutout = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(Offset.zero & size)
       ..addRSuperellipse(
         RSuperellipse.fromRectAndRadius(
           scanWindow,
           Radius.circular(borderRadius),
         ),
       );
-
-    final backgroundPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    final backgroundWithCutout = Path.combine(
-      PathOperation.difference,
-      backgroundPath,
-      cutoutPath,
-    );
-
-    canvas.drawPath(backgroundWithCutout, backgroundPaint);
+    canvas.drawPath(backgroundWithCutout, Paint()..color = color);
   }
 
   @override

@@ -6,17 +6,15 @@ import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/common/window.dart';
 import 'package:fl_clash/bootstrap.dart';
 import 'package:fl_clash/common/system_dns.dart';
-import 'package:fl_clash/icons/icons.dart';
+import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/l10n/l10n.dart';
 import 'package:fl_clash/manager/hotkey_manager.dart';
 import 'package:fl_clash/manager/manager.dart';
 import 'package:fl_clash/plugins/app.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
-import 'package:fl_clash/widgets/focus.dart';
-import 'package:fl_clash/widgets/keyboard_inset_hold.dart';
+import 'package:fl_clash/ui/ui.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -62,17 +60,6 @@ class Application extends ConsumerStatefulWidget {
   ConsumerState<Application> createState() => ApplicationState();
 }
 
-const _actionIconTheme = ActionIconThemeData(
-  backButtonIconBuilder: _backButtonIcon,
-  closeButtonIconBuilder: _closeButtonIcon,
-);
-
-Widget _backButtonIcon(BuildContext context) =>
-    GlyphIcon(AppGlyphs.backFor(Theme.of(context).platform));
-
-Widget _closeButtonIcon(BuildContext context) =>
-    const GlyphIcon(AppGlyphs.close);
-
 class ApplicationState extends ConsumerState<Application> {
   Timer? _autoUpdateProfilesTaskTimer;
   bool _preHasVpn = false;
@@ -80,19 +67,6 @@ class ApplicationState extends ConsumerState<Application> {
   final _terminateSignals = system.isDesktop && !system.isWindows
       ? ProcessSignal.sigterm.watch()
       : null;
-
-  final _pageTransitionsTheme = const PageTransitionsTheme(
-    builders: <TargetPlatform, PageTransitionsBuilder>{
-      TargetPlatform.android: commonSharedXPageTransitions,
-      TargetPlatform.windows: commonSharedXPageTransitions,
-      TargetPlatform.linux: commonSharedXPageTransitions,
-      TargetPlatform.macOS: commonSharedXPageTransitions,
-    },
-  );
-
-  ColorScheme _getAppColorScheme({required Brightness brightness}) {
-    return ref.read(genColorSchemeProvider(brightness));
-  }
 
   @override
   void initState() {
@@ -161,6 +135,14 @@ class ApplicationState extends ConsumerState<Application> {
     final hasVpn = results.contains(ConnectivityResult.vpn);
     if (_preHasVpn == hasVpn) {
       ref.read(routeTrackerProvider.notifier).bumpHostEpoch();
+      // Android's NetworkObserver tells the Core about a new network itself.
+      if (system.isDesktop) {
+        debouncer.call(
+          FunctionTag.clearDnsCache,
+          ref.read(coreActionProvider.notifier).clearDnsCacheOnNetworkChange,
+          duration: const Duration(milliseconds: 200),
+        );
+      }
     }
     _preHasVpn = hasVpn;
   }
@@ -173,28 +155,27 @@ class ApplicationState extends ConsumerState<Application> {
           appSettingProvider.select((state) => state.locale),
         );
         final themeProps = ref.watch(themeSettingProvider);
-        final fontFamilyFallback = appFontFamilyFallback(
-          platform: defaultTargetPlatform,
-          locales: [
-            ?getLocaleForString(locale),
-            ...WidgetsBinding.instance.platformDispatcher.locales,
-          ],
-          fontFamily: themeProps.fontFamily,
-        );
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           navigatorKey: globalState.navigatorKey,
           onNavigationNotification: (_) => true,
           localizationsDelegates: const [
             AppLocalizations.delegate,
+            AppUiLocalizations.delegate,
             ...GlobalMaterialLocalizations.delegates,
           ],
           builder: (context, child) {
-            return buildManagerStack(
-              isDesktop: system.isDesktop,
-              onConnectivityChanged: _handleConnectivityChanged,
-              terminateSignals: _terminateSignals,
-              child: RemoteFocusAdapter(enabled: system.isTV, child: child!),
+            return ThemeCrossFade(
+              child: buildManagerStack(
+                isDesktop: system.isDesktop,
+                onConnectivityChanged: _handleConnectivityChanged,
+                terminateSignals: _terminateSignals,
+                child: RemoteFocusAdapter(
+                  enabled: system.isTV,
+                  floatingKeyboard: app?.floatingKeyboard,
+                  child: child!,
+                ),
+              ),
             );
           },
           scrollBehavior: const BaseScrollBehavior(),
@@ -202,22 +183,9 @@ class ApplicationState extends ConsumerState<Application> {
           locale: getLocaleForString(locale),
           supportedLocales: AppLocalizations.delegate.supportedLocales,
           themeMode: themeProps.themeMode,
-          theme: ThemeData(
-            useMaterial3: true,
-            pageTransitionsTheme: _pageTransitionsTheme,
-            actionIconTheme: _actionIconTheme,
-            colorScheme: _getAppColorScheme(brightness: Brightness.light),
-            fontFamily: themeProps.fontFamily,
-            fontFamilyFallback: fontFamilyFallback,
-          ).withAppShapes,
-          darkTheme: ThemeData(
-            useMaterial3: true,
-            pageTransitionsTheme: _pageTransitionsTheme,
-            actionIconTheme: _actionIconTheme,
-            colorScheme: _getAppColorScheme(brightness: Brightness.dark),
-            fontFamily: themeProps.fontFamily,
-            fontFamilyFallback: fontFamilyFallback,
-          ).withAppShapes,
+          theme: watchAppTheme(ref, Brightness.light),
+          darkTheme: watchAppTheme(ref, Brightness.dark),
+          themeAnimationStyle: AnimationStyle.noAnimation,
           home: KeyboardInsetHold(child: child!),
         );
       },

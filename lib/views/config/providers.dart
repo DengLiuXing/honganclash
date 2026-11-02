@@ -1,16 +1,15 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
-import 'package:fl_clash/icons/icons.dart';
+import 'package:fl_clash/features/form/form.dart';
 import 'package:fl_clash/models/models.dart';
 import 'package:fl_clash/pages/editor.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class ClashProvidersView extends ConsumerStatefulWidget {
@@ -82,7 +81,8 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
 
   Future<void> _handleImportFromUrl() async {
     final appLocalizations = context.appLocalizations;
-    final res = await dialogs.showNamedUrlsInput(
+    final res = await showNamedUrlsForm(
+      context,
       title: appLocalizations.importUrl,
       labelValidator: (value) => _validateLabel(value, optional: true),
       urlValidator: _validateProviderUrl,
@@ -150,7 +150,7 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
 
   Future<void> _handleEditorSave(
     String title,
-    String content, {
+    EditorContent content, {
     ClashProvider? provider,
   }) async {
     final appLocalizations = context.appLocalizations;
@@ -164,7 +164,7 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
     }
     if (_reservedLabels(except: provider).contains(label)) {
       unawaited(
-        dialogs.showMessage(
+        dialogs.showAlert(
           message: TextSpan(
             text: appLocalizations.existsTip(appLocalizations.name),
           ),
@@ -174,7 +174,11 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
     }
     final next =
         provider?.copyWith(label: label) ?? ClashProvider.create(label: label);
-    if (!await _put(next, previous: provider, content: utf8.encode(content))) {
+    if (!await _put(
+      next,
+      previous: provider,
+      content: await content.readBytes(),
+    )) {
       return;
     }
     if (mounted) {
@@ -184,16 +188,10 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
 
   Future<bool> _handleEditorPop(
     String title,
-    String content,
-    String raw, {
+    EditorContent content, {
     ClashProvider? provider,
   }) async {
-    if (content == raw && title == (provider?.label ?? '')) {
-      return true;
-    }
-    final res = await dialogs.showMessage(
-      message: TextSpan(text: context.appLocalizations.saveChanges),
-    );
+    final res = await dialogs.showSaveChanges();
     if (res == null) {
       return false;
     }
@@ -205,19 +203,20 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
   }
 
   void _handleToEditor([ClashProvider? provider]) {
-    late final String raw;
     unawaited(
       BaseNavigator.push(
         context,
         EditorPage(
           titleEditable: true,
           title: provider?.label ?? '',
-          load: () async => raw = (await provider?.content) ?? '',
+          load: () async => provider == null
+              ? CodeForgeDocument.fromText('')
+              : openEditorFile(await provider.path),
           schema: EditorSchema.provider,
           onSave: (_, title, content) =>
               _handleEditorSave(title, content, provider: provider),
           onPop: (_, title, content) =>
-              _handleEditorPop(title, content, raw, provider: provider),
+              _handleEditorPop(title, content, provider: provider),
         ),
       ),
     );
@@ -231,8 +230,10 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
         EditorPage(
           title: provider.label,
           load: () async => provider.isTextContent
-              ? (await provider.content) ?? ''
-              : core.dumpRuleSet(await provider.path),
+              ? openEditorFile(await provider.path)
+              : CodeForgeDocument.fromText(
+                  await core.dumpRuleSet(await provider.path),
+                ),
           schema: EditorSchema.provider,
         ),
       ),
@@ -240,7 +241,7 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
   }
 
   Future<void> _handleEditOptions(ClashProvider provider) =>
-      _showClashProviderOptions(ref, provider);
+      _showClashProviderOptions(context, ref, provider);
 
   Future<void> _handleDelete(ClashProvider provider) async {
     final appLocalizations = context.appLocalizations;
@@ -255,6 +256,8 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
                 users.map((profile) => profile.realLabel).join(', '),
               ),
       ),
+      destructive: true,
+      confirmText: appLocalizations.delete,
     );
     if (res != true) {
       return;
@@ -357,9 +360,10 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
         label: appLocalizations.nullTip(appLocalizations.ruleProviders),
       ),
       child: ReorderableListView.builder(
-        padding: const EdgeInsets.all(
-          16,
-        ).copyWith(top: context.contentTopPadding),
+        padding: const EdgeInsets.all(16).copyWith(
+          top: context.contentTopPadding,
+          bottom: 16 + context.bottomInset,
+        ),
         buildDefaultDragHandles: false,
         itemCount: providers.length,
         itemBuilder: (_, index) => _buildItem(providers, index),
@@ -388,10 +392,7 @@ class _ClashProvidersViewState extends ConsumerState<ClashProvidersView> {
           targetBuilder: (open) {
             return IconButton(
               tooltip: appLocalizations.add,
-              onPressed: () {
-                final isMobile = ref.read(isMobileViewProvider);
-                open(offset: Offset(0, isMobile ? 0 : 20));
-              },
+              onPressed: open,
               icon: const GlyphIcon(AppGlyphs.addCircle),
             );
           },
@@ -469,11 +470,13 @@ class _RuleSetUpdateTimeState extends ConsumerState<_RuleSetUpdateTime> {
 }
 
 Future<void> _showClashProviderOptions(
+  BuildContext context,
   WidgetRef ref,
   ClashProvider provider,
 ) async {
-  final res = await dialogs.showCommonDialog<ClashProvider>(
-    child: _ProviderDialog(
+  final res = await showFormSheet<ClashProvider>(
+    context: context,
+    builder: (_) => _ProviderForm(
       provider: provider,
       reservedLabels: {
         for (final item
@@ -508,20 +511,22 @@ String? _validateProviderUrl(String? value) {
   return null;
 }
 
-class _ProviderDialog extends StatefulWidget {
-  const _ProviderDialog({required this.provider, required this.reservedLabels});
+enum _ProviderField { label, url }
+
+class _ProviderForm extends StatefulWidget {
+  const _ProviderForm({required this.provider, required this.reservedLabels});
 
   final ClashProvider provider;
   final Set<String> reservedLabels;
 
   @override
-  State<_ProviderDialog> createState() => _ProviderDialogState();
+  State<_ProviderForm> createState() => _ProviderFormState();
 }
 
-class _ProviderDialogState extends State<_ProviderDialog> {
-  final _formKey = GlobalKey<FormState>();
+class _ProviderFormState extends State<_ProviderForm> {
   late final TextEditingController _labelController;
   late final TextEditingController _urlController;
+  bool _attempted = false;
 
   ClashProvider get _provider => widget.provider;
 
@@ -539,20 +544,40 @@ class _ProviderDialogState extends State<_ProviderDialog> {
     super.dispose();
   }
 
-  String? _validateLabel(String? value) {
+  ({_ProviderField field, String message})? _issue() {
     final appLocalizations = context.appLocalizations;
-    final label = value?.trim() ?? '';
+    final label = _labelController.text.trim();
     if (label.isEmpty) {
-      return appLocalizations.emptyTip(appLocalizations.name);
+      return (
+        field: _ProviderField.label,
+        message: appLocalizations.emptyTip(appLocalizations.name),
+      );
     }
     if (widget.reservedLabels.contains(label)) {
-      return appLocalizations.existsTip(appLocalizations.name);
+      return (
+        field: _ProviderField.label,
+        message: appLocalizations.existsTip(appLocalizations.name),
+      );
+    }
+    if (_provider.isRemote) {
+      if (_validateProviderUrl(_urlController.text) case final message?) {
+        return (field: _ProviderField.url, message: message);
+      }
     }
     return null;
   }
 
+  void _handleChanged(String _) {
+    if (_attempted) {
+      setState(() {});
+    }
+  }
+
   void _handleSubmit() {
-    if (_formKey.currentState?.validate() == false) {
+    if (_issue() != null) {
+      setState(() {
+        _attempted = true;
+      });
       return;
     }
     Navigator.of(context).pop(
@@ -563,61 +588,50 @@ class _ProviderDialogState extends State<_ProviderDialog> {
     );
   }
 
-  Widget _buildField({
-    required TextEditingController controller,
-    required String label,
-    FormFieldValidator<String>? validator,
-    TextInputType? keyboardType,
-    List<TextInputFormatter>? inputFormatters,
-  }) {
-    return TextFormField(
-      controller: controller,
-      validator: validator,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      decoration: InputDecoration(border: AppShape.input, labelText: label),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final appLocalizations = context.appLocalizations;
-    return CommonDialog(
+    final issue = _attempted ? _issue() : null;
+    return FormPage(
       title: appLocalizations.options,
-      actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.of(context).pop();
-          },
-          child: Text(appLocalizations.cancel),
-        ),
-        TextButton(
-          onPressed: _handleSubmit,
-          child: Text(appLocalizations.confirm),
-        ),
-      ],
-      child: Form(
-        key: _formKey,
-        autovalidateMode: AutovalidateMode.onUserInteraction,
-        child: Wrap(
-          runSpacing: 16,
-          children: [
-            _buildField(
-              controller: _labelController,
-              label: appLocalizations.name,
-              validator: _validateLabel,
-              inputFormatters: TextInputLimits.limit(TextInputLimits.name),
+      onSave: _handleSubmit,
+      error: issue?.message,
+      children: [
+        generateSection(
+          items: [
+            FormRow(
+              title: appLocalizations.name,
+              invalid: issue?.field == _ProviderField.label,
+              trailing: FormRowTextField(
+                controller: _labelController,
+                hintText: appLocalizations.required,
+                textInputAction: _provider.isRemote
+                    ? TextInputAction.next
+                    : TextInputAction.done,
+                inputFormatters: TextInputLimits.limit(TextInputLimits.name),
+                onChanged: _handleChanged,
+                onFieldSubmitted: _provider.isRemote
+                    ? null
+                    : (_) => _handleSubmit(),
+              ),
             ),
             if (_provider.isRemote)
-              _buildField(
-                controller: _urlController,
-                label: appLocalizations.url,
-                validator: _validateProviderUrl,
-                keyboardType: TextInputType.url,
+              FormRow(
+                title: appLocalizations.url,
+                invalid: issue?.field == _ProviderField.url,
+                trailing: FormRowTextField(
+                  controller: _urlController,
+                  hintText: appLocalizations.required,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.done,
+                  autocorrect: false,
+                  onChanged: _handleChanged,
+                  onFieldSubmitted: (_) => _handleSubmit(),
+                ),
               ),
           ],
         ),
-      ),
+      ],
     );
   }
 }

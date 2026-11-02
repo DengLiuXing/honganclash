@@ -5,7 +5,6 @@ import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/database/database.dart';
 import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/models/models.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'generated/database.g.dart';
@@ -133,18 +132,8 @@ Stream<List<Profile>> profilesStream(Ref ref) {
 }
 
 @riverpod
-Stream<List<Rule>> addedRulesStream(Ref ref, int profileId) {
-  return database.rulesDao.queryAddedRules(profileId).watch();
-}
-
-@riverpod
 Stream<Set<String>> customGroupNames(Ref ref) {
   return database.proxyGroupsDao.names().watch().map(Set.of);
-}
-
-@riverpod
-Stream<int> proxyGroupsCount(Ref ref, int profileId) {
-  return database.proxyGroupsDao.count(profileId).watchSingle();
 }
 
 @Riverpod(keepAlive: true)
@@ -213,8 +202,16 @@ class Profiles extends _$Profiles {
   /// A new provider label follows into custom profiles whatever path set it.
   void put(Profile profile) {
     final newProfile = labeled(profile);
-    final previousLabel = state.getProfile(profile.id)?.realLabel;
-    var next = state.copyAndPut(newProfile, (item) => item.id == newProfile.id);
+    final previous = state.getProfile(profile.id);
+    final previousLabel = previous?.realLabel;
+    // A new profile goes where the query sorts it, so the read-back after the
+    // write does not move it.
+    var next = previous == null
+        ? ([...state]..insert(
+            lowerBound(state, newProfile, compare: ProfilesDao.compare),
+            newProfile,
+          ))
+        : state.copyAndPut(newProfile, (item) => item.id == newProfile.id);
     if (newProfile.type == ProfileType.custom ||
         previousLabel == null ||
         previousLabel == newProfile.realLabel) {
@@ -517,17 +514,6 @@ class IconSets extends _$IconSets with AsyncNotifierMixin, OptimisticMixin {
   }
 }
 
-@riverpod
-Future<Script?> script(Ref ref, int? scriptId) async {
-  final script = ref.watch(
-    scriptsProvider.future.select((state) async {
-      final scripts = await state;
-      return scripts.get(scriptId);
-    }),
-  );
-  return script;
-}
-
 mixin RuleListMixin on OptimisticMixin<List<Rule>> {
   Future<void> persistRule(Rule rule);
 
@@ -637,6 +623,11 @@ class GlobalRules extends _$GlobalRules
 
   @override
   Future<void> persistRule(Rule rule) => database.rulesDao.putRule(rule);
+}
+
+@riverpod
+Stream<int> profileGroupsCount(Ref ref, int profileId) {
+  return database.proxyGroupsDao.profileGroupsCount(profileId).watchSingle();
 }
 
 /// What the standard extension adds to a profile, or a custom profile's rules.

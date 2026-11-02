@@ -4,7 +4,9 @@ import 'dart:io';
 
 import 'package:fl_clash/common/context.dart';
 import 'package:fl_clash/common/system.dart';
-import 'package:fl_clash/icons/icons.dart';
+import 'package:fl_clash/ui/color.dart';
+import 'package:fl_clash/ui/icons/icons.dart';
+import 'package:fl_clash/ui/surface.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
@@ -119,35 +121,23 @@ enum ViewMode { mobile, laptop, desktop }
 
 enum LogLevel { debug, info, warning, error, silent }
 
-enum RecordTone { muted, neutral, warning, error }
+enum RecordTone { neutral, warning, error }
 
 extension RecordToneExt on RecordTone {
   Color? accentColor(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return switch (this) {
-      RecordTone.warning => colorScheme.tertiary,
+      RecordTone.warning => colorScheme.warning,
       RecordTone.error => colorScheme.error,
-      RecordTone.muted || RecordTone.neutral => null,
-    };
-  }
-
-  Color? tintColor(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return switch (this) {
-      RecordTone.warning => colorScheme.tertiaryContainer.withValues(
-        alpha: 0.2,
-      ),
-      RecordTone.error => colorScheme.errorContainer.withValues(alpha: 0.2),
-      RecordTone.muted || RecordTone.neutral => null,
+      RecordTone.neutral => null,
     };
   }
 
   Color labelColor(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return switch (this) {
-      RecordTone.muted => colorScheme.outline,
       RecordTone.neutral => colorScheme.onSurfaceVariant,
-      RecordTone.warning => colorScheme.onTertiaryContainer,
+      RecordTone.warning => colorScheme.onWarningContainer,
       RecordTone.error => colorScheme.onErrorContainer,
     };
   }
@@ -155,9 +145,8 @@ extension RecordToneExt on RecordTone {
   Color labelContainerColor(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return switch (this) {
-      RecordTone.muted => colorScheme.surfaceContainerHigh,
-      RecordTone.neutral => colorScheme.surfaceContainerHighest,
-      RecordTone.warning => colorScheme.tertiaryContainer,
+      RecordTone.neutral => context.raisedSurfaceLevel.colorOf(colorScheme),
+      RecordTone.warning => colorScheme.warningContainer,
       RecordTone.error => colorScheme.errorContainer,
     };
   }
@@ -179,7 +168,7 @@ extension MessageLevelExt on MessageLevel {
     final colorScheme = Theme.of(context).colorScheme;
     return switch (this) {
       MessageLevel.error => colorScheme.errorContainer,
-      _ => colorScheme.surfaceContainerHigh,
+      _ => SurfaceLevel.floatingOf(colorScheme).colorOf(colorScheme),
     };
   }
 
@@ -195,8 +184,8 @@ extension MessageLevelExt on MessageLevel {
     final colorScheme = Theme.of(context).colorScheme;
     return switch (this) {
       MessageLevel.info => colorScheme.onSurfaceVariant,
-      MessageLevel.success => colorScheme.primary,
-      MessageLevel.warning => colorScheme.tertiary,
+      MessageLevel.success => colorScheme.success,
+      MessageLevel.warning => colorScheme.warning,
       MessageLevel.error => colorScheme.onErrorContainer,
     };
   }
@@ -235,6 +224,7 @@ enum CoreEventType {
   log,
   delay,
   request,
+  requestTraffic,
   dns,
   loaded,
   crash,
@@ -249,13 +239,11 @@ enum InterfaceNameMode { clear, follow, custom }
 
 enum RestoreOption { all, onlyProfiles }
 
-enum CommonCardType { plain, filled }
-
 enum ProxiesType { tab, list }
 
 enum ProxiesLayout { loose, standard, tight }
 
-enum ProxyCardType { expand, shrink, min }
+enum ProxyCardType { loose, standard, compact }
 
 enum DnsMode {
   normal,
@@ -332,6 +320,7 @@ enum DnsOverrideKey with OverrideKey {
     fakeIpFilterMode,
     defaultNameserver,
     nameserver,
+    fallback,
     proxyServerNameserver,
     directNameserver,
   };
@@ -375,13 +364,42 @@ enum SnifferOverrideKey with OverrideKey {
 }
 
 /// Written over the profile's `tun` section, which Android's VPN never reads,
-/// so these apply on desktop only. The network settings' `Tun` holds the rest.
+/// so these apply on desktop only, beside the keys of `Tun.coreJson`.
 @JsonEnum(valueField: 'path')
 enum TunOverrideKey with OverrideKey {
+  mtu('mtu'),
+  congestionController('congestion-controller'),
+  strictRoute('strict-route'),
+  routeAddress('route-address'),
+  routeExcludeAddress('route-exclude-address'),
+  dnsHijack('dns-hijack'),
+  udpTimeout('udp-timeout'),
   disableIcmpForwarding('disable-icmp-forwarding'),
-  excludeInterface('exclude-interface');
+  gso('gso'),
+  includeInterface('include-interface'),
+  excludeInterface('exclude-interface'),
+  includeUid('include-uid'),
+  excludeUid('exclude-uid'),
+  excludeSrcPort('exclude-src-port'),
+  excludeDstPort('exclude-dst-port');
 
   const TunOverrideKey(this.path);
+
+  @override
+  final String path;
+}
+
+/// Top-level profile keys, except `test-url`: the Core takes that one apart
+/// as the URL of every group and provider that names none.
+@JsonEnum(valueField: 'path')
+enum GeneralOverrideKey with OverrideKey {
+  testUrl('test-url'),
+  unifiedDelay('unified-delay'),
+  tcpConcurrent('tcp-concurrent'),
+  ipv6('ipv6'),
+  geodataLoader('geodata-loader');
+
+  const GeneralOverrideKey(this.path);
 
   @override
   final String path;
@@ -428,15 +446,6 @@ enum HotAction {
 
 enum ProxiesIconStyle { filled, plain, hidden }
 
-enum FontFamily {
-  twEmoji('Twemoji'),
-  jetBrainsMono('JetBrainsMono');
-
-  final String value;
-
-  const FontFamily(this.value);
-}
-
 enum EditorFontSize {
   standard(16),
   large(18),
@@ -453,47 +462,36 @@ enum TunAuthorizationState { none, authorized, unauthorized }
 
 enum FunctionTag {
   updateConfig,
-  setupConfig,
   updateGroups,
   applyProfile,
   savePreferences,
   changeProxy,
-  handleWill,
   updateDelay,
   autoLaunch,
-  updatePageIndex,
-  pageChange,
-  proxiesTabChange,
   logs,
   requests,
   dnsQueries,
-  autoScrollToEnd,
   loadedProvider,
   saveSharedFile,
-  removeProxy,
   suspend,
   coreErrorNotifier,
   dialerLoopNotifier,
   reloadPackages,
+  clearDnsCache,
 }
 
 enum DashboardWidget {
+  currentOutbound,
   networkSpeed,
   outboundMode,
-  trafficUsage,
-  networkDetection,
-  tunButton(platforms: desktopPlatforms),
   vpnButton(platforms: [SupportPlatform.Android]),
-  systemProxyButton(platforms: desktopPlatforms),
-  intranetIp,
-  memoryInfo,
+  networkTakeover(platforms: desktopPlatforms),
   serviceStatus,
-  dnsQueries,
-  requests,
-  connections,
-  runTime,
+  profiles,
   proxyGroups,
-  profiles;
+  connectionStats,
+  intranetIp,
+  memoryInfo;
 
   final List<SupportPlatform> platforms;
 
@@ -701,7 +699,7 @@ extension RuleActionExt on RuleAction {
   }
 }
 
-enum ProxyFieldKind { text, secret, number, toggle, choice, list }
+enum ProxyFieldKind { text, secret, number, toggle, choice, list, map }
 
 /// A key of a proxy definition the form edits, at [path] since the core reads
 /// transport, TLS and plugin settings from maps of their own.
@@ -727,9 +725,27 @@ enum ProxyField {
   flow(['flow'], ProxyFieldKind.choice),
   wsPath(['ws-opts', 'path']),
   wsHost(['ws-opts', 'headers', 'Host']),
+  wsHeaders(['ws-opts', 'headers'], ProxyFieldKind.map),
+  wsMaxEarlyData(['ws-opts', 'max-early-data'], ProxyFieldKind.number),
+  wsEarlyDataHeaderName(['ws-opts', 'early-data-header-name']),
+  wsHttpUpgrade(['ws-opts', 'v2ray-http-upgrade'], ProxyFieldKind.toggle),
+  wsHttpUpgradeFastOpen([
+    'ws-opts',
+    'v2ray-http-upgrade-fast-open',
+  ], ProxyFieldKind.toggle),
+  httpMethod(['http-opts', 'method']),
+  httpPath(['http-opts', 'path'], ProxyFieldKind.list),
+  httpHost(['http-opts', 'headers', 'Host'], ProxyFieldKind.list),
+  httpHeaders(['http-opts', 'headers'], ProxyFieldKind.map),
+  h2Host(['h2-opts', 'host'], ProxyFieldKind.list),
+  h2Path(['h2-opts', 'path']),
   grpcServiceName(['grpc-opts', 'grpc-service-name']),
   xhttpPath(['xhttp-opts', 'path']),
   xhttpHost(['xhttp-opts', 'host']),
+  mkcpSeed(['mkcp-opts', 'seed'], ProxyFieldKind.secret),
+  mkcpHeader(['mkcp-opts', 'header'], ProxyFieldKind.choice),
+  mekyaUrl(['mekya-opts', 'url']),
+  headers(['headers'], ProxyFieldKind.map),
   tls(['tls'], ProxyFieldKind.toggle),
   sni(['sni']),
   servername(['servername']),
@@ -741,6 +757,20 @@ enum ProxyField {
   plugin(['plugin'], ProxyFieldKind.choice),
   pluginMode(['plugin-opts', 'mode']),
   pluginHost(['plugin-opts', 'host']),
+  pluginPath(['plugin-opts', 'path']),
+  pluginUsername(['plugin-opts', 'username']),
+  pluginPassword(['plugin-opts', 'password'], ProxyFieldKind.secret),
+  pluginVersion(['plugin-opts', 'version'], ProxyFieldKind.number),
+  pluginVersionHint(['plugin-opts', 'version-hint'], ProxyFieldKind.choice),
+  pluginRestlsScript(['plugin-opts', 'restls-script']),
+  pluginKey(['plugin-opts', 'key'], ProxyFieldKind.secret),
+  pluginCrypt(['plugin-opts', 'crypt'], ProxyFieldKind.choice),
+  pluginTls(['plugin-opts', 'tls'], ProxyFieldKind.toggle),
+  pluginMux(['plugin-opts', 'mux'], ProxyFieldKind.toggle),
+  pluginSkipCertVerify([
+    'plugin-opts',
+    'skip-cert-verify',
+  ], ProxyFieldKind.toggle),
   udpOverTcp(['udp-over-tcp'], ProxyFieldKind.toggle),
   protocolParam(['protocol-param']),
   obfsParam(['obfs-param']),
@@ -825,9 +855,11 @@ enum RestoreStrategy { compatible, override }
 
 enum TabAnimation { slide, fade }
 
+enum LiquidGlassMode { none, standard, ultra }
+
 enum Language { yaml, javaScript, json }
 
-enum ScrollPositionCacheKey { tools, profiles, proxiesList, proxiesTabList }
+enum ScrollPositionCacheKey { proxiesTabList }
 
 enum QueryTag { proxies, access }
 
@@ -845,46 +877,3 @@ enum LoadingTag {
 enum CoreStatus { connecting, connected, disconnected }
 
 enum UpdatingScope { core, local }
-
-enum ItemPosition {
-  start,
-  middle,
-  end,
-  startAndEnd;
-
-  static ItemPosition get(int index, int length) {
-    ItemPosition position = ItemPosition.middle;
-    if (length == 1) {
-      position = ItemPosition.startAndEnd;
-    } else if (index == length - 1) {
-      position = ItemPosition.end;
-    } else if (index == 0) {
-      position = ItemPosition.start;
-    }
-    return position;
-  }
-
-  static ItemPosition calculateVisualPosition<T>(
-    int currentIndex,
-    List<T> items,
-    Set<T> deletedItems,
-  ) {
-    if (deletedItems.isEmpty) {
-      return ItemPosition.get(currentIndex, items.length);
-    }
-    final currentItem = items[currentIndex];
-    if (deletedItems.contains(currentItem)) {
-      return ItemPosition.middle;
-    }
-    final int visualLength = items.length - deletedItems.length;
-    if (visualLength <= 0) return ItemPosition.middle;
-    int deletedCountBeforeMe = 0;
-    for (int i = 0; i < currentIndex; i++) {
-      if (deletedItems.contains(items[i])) {
-        deletedCountBeforeMe++;
-      }
-    }
-    final int visualIndex = currentIndex - deletedCountBeforeMe;
-    return ItemPosition.get(visualIndex, visualLength);
-  }
-}

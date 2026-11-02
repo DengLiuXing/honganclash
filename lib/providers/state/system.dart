@@ -2,9 +2,6 @@ part of '../state.dart';
 
 @riverpod
 UpdateParams updateParams(Ref ref) {
-  final bypassPrivateRoute = ref.watch(
-    networkSettingProvider.select((state) => state.bypassPrivateRoute),
-  );
   final authentication = ref.watch(
     networkSettingProvider.select((state) => state.authentication),
   );
@@ -14,7 +11,6 @@ UpdateParams updateParams(Ref ref) {
   return ref.watch(
     patchClashConfigProvider.select(
       (state) => state.toUpdateParams(
-        bypassPrivateRoute: bypassPrivateRoute,
         authentication: authentication.credentials,
         skipCertVerify: !checkCertificate,
       ),
@@ -23,7 +19,8 @@ UpdateParams updateParams(Ref ref) {
 }
 
 @riverpod
-({PatchClashConfig patchConfig, bool appendSystemDns}) setupPatch(Ref ref) {
+({PatchClashConfig patchConfig, bool appendSystemDns, bool bypassPrivateRoute})
+setupPatch(Ref ref) {
   return (
     patchConfig: ref.watch(
       patchClashConfigProvider.select((state) => state.setupOnly),
@@ -31,6 +28,12 @@ UpdateParams updateParams(Ref ref) {
     appendSystemDns: ref.watch(
       networkSettingProvider.select((state) => state.appendSystemDns),
     ),
+    // Android's VPN service takes it on its next start instead.
+    bypassPrivateRoute:
+        system.isDesktop &&
+        ref.watch(
+          networkSettingProvider.select((state) => state.bypassPrivateRoute),
+        ),
   );
 }
 
@@ -51,13 +54,17 @@ TrayState trayState(Ref ref) {
   );
   final appSetting = ref.watch(
     appSettingProvider.select(
-      (state) =>
-          (autoLaunch: state.autoLaunch, showTrayTitle: state.showTrayTitle),
+      (state) => (
+        autoLaunch: state.autoLaunch,
+        showTrayTitle: state.showTrayTitle,
+        monochromeTrayIcon: state.monochromeTrayIcon,
+      ),
     ),
   );
   final groups = ref.watch(currentGroupsStateProvider).value;
   final selectedMap = ref.watch(selectedMapProvider);
   final safeMode = ref.watch(safeModeProvider);
+  final suspended = ref.watch(suspendProvider);
   final hotKeys = _trayHotKeys(ref);
 
   return TrayState(
@@ -67,9 +74,11 @@ TrayState trayState(Ref ref) {
     systemProxy: systemProxy,
     tunEnable: clashConfig.tunEnable,
     isStart: isStart,
+    suspended: isStart && suspended,
     groups: groups,
     selectedMap: selectedMap,
     showTrayTitle: appSetting.showTrayTitle,
+    monochromeTrayIcon: appSetting.monochromeTrayIcon,
     safeMode: safeMode,
     hotKeys: hotKeys,
   );
@@ -97,7 +106,7 @@ Map<String, Map<String, int>> trayDelays(Ref ref) {
   final allGroups = ref.watch(groupsProvider);
   final selectedMap = ref.watch(selectedMapProvider);
   final defaultTestUrl = ref.watch(
-    appSettingProvider.select((state) => state.testUrl),
+    patchClashConfigProvider.select((state) => state.testUrl),
   );
   final delays = <String, Map<String, int>>{};
   for (final group in groups) {
@@ -131,18 +140,6 @@ TrayTitleState trayTitleState(Ref ref) {
     trafficsProvider.select((state) => state.list.safeLast(const Traffic())),
   );
   return TrayTitleState(showTrayTitle: showTrayTitle, traffic: traffic);
-}
-
-@riverpod
-PackageListSelectorState packageListSelectorState(Ref ref) {
-  final packages = ref.watch(packagesProvider);
-  final accessControlProps = ref.watch(
-    vpnSettingProvider.select((state) => state.accessControlProps),
-  );
-  return PackageListSelectorState(
-    packages: packages,
-    accessControlProps: accessControlProps,
-  );
 }
 
 @riverpod
@@ -189,8 +186,6 @@ SharedState sharedState(Ref ref) {
       (state) => (
         onlyStatisticsProxy: state.onlyStatisticsProxy,
         showStopAction: state.showNotificationStopAction,
-        crashlytics: state.crashlytics,
-        testUrl: state.testUrl,
         checkCertificate: state.checkCertificate,
       ),
     ),
@@ -198,14 +193,14 @@ SharedState sharedState(Ref ref) {
   final currentProfileName = currentProfile.label;
   final selectedMap = currentProfile.selectedMap;
   final onlyStatisticsProxy = appSetting.onlyStatisticsProxy;
-  final crashlytics = appSetting.crashlytics;
-  final testUrl = appSetting.testUrl;
+  final testUrl = ref.watch(
+    patchClashConfigProvider.select((state) => state.testUrl),
+  );
   return SharedState(
     currentProfileName: currentProfileName,
     onlyStatisticsProxy: onlyStatisticsProxy,
     showStopAction: appSetting.showStopAction,
     stopText: currentAppLocalizations.stop,
-    crashlytics: crashlytics,
     stopTip: currentAppLocalizations.stopVpn,
     startTip: currentAppLocalizations.startVpn,
     localNetworkTip: currentAppLocalizations.localNetworkDeniedTip,

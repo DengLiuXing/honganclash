@@ -1,12 +1,12 @@
 package core
 
 import (
-	"net/netip"
 	"time"
 
 	"github.com/metacubex/http"
 	"github.com/metacubex/mihomo/adapter/provider"
 	P "github.com/metacubex/mihomo/component/process"
+	"github.com/metacubex/mihomo/config"
 	"github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
@@ -41,6 +41,7 @@ const (
 	getConnectionCountMethod       CoreMethod = "getConnectionCount"
 	closeConnectionsMethod         CoreMethod = "closeConnections"
 	resetConnectionsMethod         CoreMethod = "resetConnections"
+	clearDnsCacheMethod            CoreMethod = "clearDnsCache"
 	closeConnectionMethod          CoreMethod = "closeConnection"
 	getExternalProvidersMethod     CoreMethod = "getExternalProviders"
 	getExternalProviderMethod      CoreMethod = "getExternalProvider"
@@ -56,10 +57,15 @@ const (
 	crashMethod                    CoreMethod = "crash"
 	setupConfigMethod              CoreMethod = "setupConfig"
 	getConfigMethod                CoreMethod = "getConfig"
+	getProfileBaseMethod           CoreMethod = "getProfileBase"
+	getProfileOutboundsMethod      CoreMethod = "getProfileOutbounds"
+	getProxyDefinitionMethod       CoreMethod = "getProxyDefinition"
+	buildProfileMethod             CoreMethod = "buildProfile"
 	dumpRuleSetMethod              CoreMethod = "dumpRuleSet"
 	compileRuleSetMethod           CoreMethod = "compileRuleSet"
 	clearEffectMethod              CoreMethod = "clearEffect"
 	watchRouteMethod               CoreMethod = "watchRoute"
+	checkRoutesMethod              CoreMethod = "checkRoutes"
 )
 
 type MessageType string
@@ -72,8 +78,9 @@ const (
 	LoadedMessage    MessageType = "loaded"
 	GeoUpdateMessage MessageType = "geoUpdate"
 	// Named after the Dart enum value, which is how CoreEvent.fromJson decodes it.
-	RouteChangedMessage MessageType = "routeChanged"
-	DialerLoopMessage   MessageType = "dialerLoop"
+	RouteChangedMessage   MessageType = "routeChanged"
+	DialerLoopMessage     MessageType = "dialerLoop"
+	RequestTrafficMessage MessageType = "requestTraffic"
 )
 
 type Message struct {
@@ -95,6 +102,31 @@ type SetupParams struct {
 	SelectedMap    map[string]string `json:"selected-map"`
 	TestURL        string            `json:"test-url"`
 	SkipCertVerify bool              `json:"skip-cert-verify"`
+	Base           *SetupBase        `json:"base,omitempty"`
+}
+
+type SetupBase struct {
+	Path    string `json:"path"`
+	Overlay string `json:"overlay"`
+}
+
+type ProfileBase struct {
+	Config      *config.RawConfig `json:"config"`
+	Digest      string            `json:"digest"`
+	MatchRules  []string          `json:"match-rules"`
+	Proxies     int               `json:"proxies"`
+	ProxyGroups int               `json:"proxy-groups"`
+	Rules       int               `json:"rules"`
+}
+
+type ProfileOutbounds struct {
+	Proxies     []ProfileOutbound `json:"proxies"`
+	ProxyGroups []ProfileOutbound `json:"proxy-groups"`
+}
+
+type ProfileOutbound struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type UpdateParams struct {
@@ -117,16 +149,10 @@ type UpdateParams struct {
 }
 
 type tunSchema struct {
-	Enable               bool               `yaml:"enable" json:"enable"`
-	Device               *string            `yaml:"device" json:"device"`
-	Stack                *constant.TUNStack `yaml:"stack" json:"stack"`
-	DNSHijack            *[]string          `yaml:"dns-hijack" json:"dns-hijack"`
-	AutoRoute            *bool              `yaml:"auto-route" json:"auto-route"`
-	RouteAddress         *[]netip.Prefix    `yaml:"route-address" json:"route-address,omitempty"`
-	MTU                  *uint32            `yaml:"mtu" json:"mtu"`
-	CongestionController *string            `yaml:"congestion-controller" json:"congestion-controller"`
-	StrictRoute          *bool              `yaml:"strict-route" json:"strict-route"`
-	RouteExcludeAddress  *[]netip.Prefix    `yaml:"route-exclude-address" json:"route-exclude-address"`
+	Enable    bool               `yaml:"enable" json:"enable"`
+	Device    *string            `yaml:"device" json:"device"`
+	Stack     *constant.TUNStack `yaml:"stack" json:"stack"`
+	AutoRoute *bool              `yaml:"auto-route" json:"auto-route"`
 }
 
 type SideLoadParams struct {
@@ -155,9 +181,8 @@ type ChangeProxyResult struct {
 }
 
 type RouteState struct {
-	CoreEpoch    uint64            `json:"core-epoch"`
-	PicksVersion uint64            `json:"picks-version"`
-	Picks        map[string]string `json:"picks"`
+	CoreEpoch    uint64 `json:"core-epoch"`
+	RouteVersion uint64 `json:"route-version"`
 }
 
 type TestDelayParams struct {
@@ -192,12 +217,13 @@ type ProbeResult struct {
 	Message     string   `json:"message,omitempty"`
 
 	CoreEpoch    uint64 `json:"core-epoch"`
-	PicksVersion uint64 `json:"picks-version"`
+	RouteVersion uint64 `json:"route-version"`
 
 	// Unexported, so it never reaches Dart: only the in-core checks read
 	// response headers, and ProbeResult is the shape the Dart side decodes.
 	header    http.Header
 	lowerBody string
+	hits      []RouteHit
 }
 
 type Traffic struct {
@@ -229,8 +255,9 @@ type ProxiesData struct {
 }
 
 type nodeView struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	ProviderName string `json:"provider-name,omitempty"`
 }
 
 type GeoUpdateStatus struct {

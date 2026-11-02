@@ -18,6 +18,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:riverpod/riverpod.dart';
 
+import '../helpers/app_paths.dart';
 import '../helpers/test_profiles.dart';
 
 class _MockCoreHandlerInterface extends Mock implements CoreHandlerInterface {}
@@ -55,13 +56,12 @@ void main() {
   late Exception? compileError;
   late Completer<void>? compileGate;
   late List<({String name, String url})> compiles;
+  late List<String> reloads;
+  late Exception? reloadError;
 
-  setUpAll(() {
+  setUpAll(() async {
     home = Directory.systemTemp.createTempSync('flclash-providers-action-');
-    AppPath.supportDirectory = () async => home;
-    AppPath.temporaryDirectory = () async => home;
-    AppPath.cacheDirectory = () async => home;
-    AppPath.downloadDirectory = () async => home;
+    await useAppPaths(home);
   });
 
   tearDownAll(() {
@@ -99,9 +99,18 @@ void main() {
     compileError = null;
     compileGate = null;
     compiles = [];
+    reloads = [];
+    reloadError = null;
     final cacheRoot = Directory(await appPath.providerCacheRootPath);
     if (cacheRoot.existsSync()) cacheRoot.deleteSync(recursive: true);
     final core = _MockCoreHandlerInterface();
+    when(() => core.updateExternalProvider(any())).thenAnswer((
+      invocation,
+    ) async {
+      reloads.add(invocation.positionalArguments.single as String);
+      if (reloadError case final error?) throw error;
+      return '';
+    });
     when(() => core.compileRuleSet(any(), url: any(named: 'url'))).thenAnswer((
       invocation,
     ) async {
@@ -478,6 +487,68 @@ void main() {
     expect(setup.forced, [true, false]);
   });
 
+  group('a refreshed remote set', () {
+    const remote = ClashProvider(
+      id: 41,
+      label: 'Remote',
+      url: 'https://example.com/r.list',
+    );
+    late ClashProvider saved;
+
+    setUp(() async {
+      await ruleSetIn(profileId, 'Remote', id: 30);
+      await action().putProvider(remote);
+      await pumpEventQueue();
+      saved = await stored(remote.id);
+      setup.forced.clear();
+    });
+
+    Future<void> refresh() async {
+      await action().putProvider(saved, previous: saved, refresh: true);
+      await pumpEventQueue();
+    }
+
+    test('is read again in place while its definition holds', () async {
+      await refresh();
+
+      expect(reloads, ['Remote']);
+      expect(setup.applies, 0);
+    });
+
+    test('reapplies once it changes shape', () async {
+      compiled = (
+        behavior: RuleProviderBehavior.classical,
+        format: RuleProviderFormat.text,
+      );
+
+      await refresh();
+
+      expect(reloads, isEmpty);
+      expect(setup.forced, [true]);
+    });
+
+    test('reapplies when the Core does not run it', () async {
+      reloadError = const CoreMethodException(
+        code: 'provider_not_found',
+        message: 'Remote',
+      );
+
+      await refresh();
+
+      expect(reloads, ['Remote']);
+      expect(setup.forced, [true]);
+    });
+
+    test('is left alone when the current profile does not use it', () async {
+      container.read(currentProfileIdProvider.notifier).value = otherCustomId;
+
+      await refresh();
+
+      expect(reloads, isEmpty);
+      expect(setup.applies, 0);
+    });
+  });
+
   group('a set changed while it downloads', () {
     const remote = ClashProvider(
       id: 41,
@@ -692,5 +763,31 @@ void main() {
 
       expect(setup.forced, [true]);
     });
+
+    test(
+      'a group taking in every provider or proxy reapplies only on the named',
+      () async {
+        await testDatabase.proxyGroups.put(
+          const ProxyGroup(
+            id: 23,
+            name: 'All',
+            type: GroupType.Selector,
+            includeAllProxies: true,
+            includeAllProviders: true,
+            order: 'b',
+          ).toCompanion(profileId),
+        );
+
+        await action().applyIfReferenced(ProviderKind.proxy, {
+          'Elsewhere',
+        }, force: true);
+        await action().applyIfProxiesNamed({'Unnamed'});
+        await action().applyIfReferenced(ProviderKind.proxy, {
+          'Home',
+        }, force: true);
+
+        expect(setup.forced, [true]);
+      },
+    );
   });
 }
