@@ -191,6 +191,22 @@ void main() {
     );
   });
 
+  testWidgets('a file profile with subscription info shows its traffic', (
+    tester,
+  ) async {
+    final file = Profile.normal(label: 'file').copyWith(
+      subscriptionInfo: const SubscriptionInfo(
+        upload: 1024,
+        download: 2048,
+        total: 4096,
+        expire: 1234567890,
+      ),
+    );
+    await pumpProfiles(tester, profiles: [file]);
+
+    expect(find.text('3KB / 4KB'), findsOneWidget);
+  });
+
   testWidgets('the usage icon opens the subscription dialog', (tester) async {
     await pumpProfiles(tester, profiles: [urlProfile('url')]);
 

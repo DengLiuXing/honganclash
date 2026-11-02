@@ -343,8 +343,7 @@ class ProfileItem extends ConsumerWidget {
     );
   }
 
-  SubscriptionInfo? get _subscriptionInfo =>
-      profile.type == ProfileType.url ? profile.subscriptionInfo : null;
+  SubscriptionInfo? get _subscriptionInfo => profile.subscriptionInfo;
 
   Widget? _buildTraffic(BuildContext context) {
     final info = _subscriptionInfo;
