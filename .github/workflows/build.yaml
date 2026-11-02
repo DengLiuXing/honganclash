@@ -61,8 +61,11 @@ jobs:
         run: |
           yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
 
+      # This fork imports upstream as a snapshot; upstream tags such as v0.8.96
+      # are absent, so the changelog range cannot be resolved here.
       - name: Verify changelog
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
         run: dart run tool/changelog.dart verify
 
       - name: Run tests
