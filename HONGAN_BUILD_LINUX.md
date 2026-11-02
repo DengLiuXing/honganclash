@@ -104,14 +104,14 @@ tool/fork_version.sh
 tool/release.sh pre --push
 ```
 
-- 版本规则：上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta[.N]`；重复构建同一上游用 `.1`、`.2`，
-  CI 用 `tool/check_fork_version.sh` 校验 tag。
+- 版本规则：上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta.0.0.N`；重复构建同一上游时只递增末位
+  （`.0.0.2`、`.0.0.3`），CI 用 `tool/check_fork_version.sh` 校验 tag。
 - `-honganBeta` 发布会标记为 GitHub prerelease，稳定通道不会自动提示。
 - RPM/Windows 安装器不接受 `-` 后缀；release workflow 打包前会把包版本归一化为 `X.Y.Z+build`。
 - tag push 会触发 `build.yaml`，构建并发布：
   - Linux amd64：deb / AppImage / rpm
   - Windows amd64：exe / zip
-  - macOS arm64 + amd64：dmg
+  - macOS arm64：dmg（Intel 那台 runner 太慢，已从矩阵移除）
   - Android arm64：apk（release 签名，见下）
 - 所有产物和 `SHA256SUMS` 会放进同一个 GitHub Release。
 - APK 构建失败不会挡住桌面安装包的发布：`upload` 只要求 `build` 成功。

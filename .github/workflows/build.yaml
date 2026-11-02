@@ -323,6 +323,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # No Intel macOS leg: `macos-15-intel` was the slowest runner in this
+      # matrix and this fork publishes beta tags only. Restoring it means adding
+      # back the `arch: amd64` entry and the FLTEnableImpeller opt-out step,
+      # because Intel macOS falls back to the Skia renderer.
       matrix:
         include:
           - platform: linux
@@ -330,9 +334,6 @@ jobs:
             arch: amd64
           - platform: windows
             os: Windows-2022
-            arch: amd64
-          - platform: macos
-            os: macos-15-intel
             arch: amd64
           - platform: macos
             os: macos-latest
@@ -363,6 +364,7 @@ jobs:
 
       # Stable publishes no Windows or Linux arm64 archive; master makes the action
       # clone the SDK at the pinned tag and let it fetch the host's own Dart SDK.
+      # See .agents/flutter-upgrade.md before bumping FLUTTER_VERSION.
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -380,11 +382,6 @@ jobs:
         run: |
           flutter --version
           flutter pub get
-
-      # See .agents/flutter-upgrade.md before bumping FLUTTER_VERSION.
-      - name: Disable Impeller on Intel macOS
-        if: matrix.platform == 'macos' && matrix.arch == 'amd64'
-        run: plutil -replace FLTEnableImpeller -bool NO macos/Runner/Info.plist
 
       # Windows defaults to pwsh, where `${GITHUB_REF_NAME}` is an empty shell
       # variable rather than the environment variable bash sees.
