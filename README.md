@@ -11,13 +11,15 @@
 
 ## 版本规则
 
-- 上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta[.N]`（例如上游 `0.9.2` → `0.9.2-honganBeta`）。
-- `.upstream-version` 记录当前上游版本；`pubspec.yaml` 的 build number 保持 `YYYYMMDDNN`。
-- `tool/release.sh pre --push` 发布 `vX.Y.Z-honganBeta.N`；`tool/fork_version.sh` 只负责把
+- 上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta.0.0.N`（例如上游 `0.9.2` → `0.9.2-honganBeta.0.0.2`）。
+  N 从 `2` 起，每次预发布只把末位加一（`.0.0.3`、`.0.0.4`…）。
+- `.upstream-version` 记录当前上游版本；`pubspec.yaml` 的 build number 保持 `YYYYMMDDNN`，
+  beta 计数只出现在 tag 上，不写进 pubspec。
+- `tool/release.sh pre --push` 发布 `vX.Y.Z-honganBeta.0.0.N`；`tool/fork_version.sh` 只负责把
   `pubspec.yaml` 的 app version 对齐 `.upstream-version`。CI 用 `tool/check_fork_version.sh` 校验 tag。
 - `-honganBeta` 发布是 GitHub prerelease，稳定通道不会自动提示；需要手动从 release 页下载。
 - RPM/Windows 安装器不接受 semver 的 `-` 后缀，release workflow 在打包前会把包版本归一化为
-  `X.Y.Z+build`；tag/Release 仍是 `X.Y.Z-honganBeta.N`，App 内显示 `X.Y.Z`。
+  `X.Y.Z+build`；tag/Release 仍是 `X.Y.Z-honganBeta.0.0.N`，App 内显示 `X.Y.Z`。
 
 ---
 
@@ -27,16 +29,20 @@
 
 | 文件 | 类型 | 说明 |
 | --- | --- | --- |
-| `lib/common/hongan.dart` | **新增** (+432) | 面板 API：`login()` / `subscription()` / `servers()`；`buildHonganConfig()` 把明文节点表生成本地 mihomo 配置 |
-| `lib/views/profiles/hongan.dart` | **新增** (+137) | 「红岸账号导入」弹窗：邮箱/密码、加载态、错误提示 |
-| `lib/views/profiles/add.dart` | 修改 (+17) | 订阅页新增入口项；登录后交给 `addHonganProfile()` |
-| `lib/providers/actions/profiles.dart` | 修改 (+40) | 生成 file profile，写入 `SubscriptionInfo`（用量/到期） |
-| `lib/views/profiles/profiles.dart` | 修改 (+3) | file profile 也显示流量用量 |
-| `lib/common/common.dart` | 修改 (+1) | `export 'hongan.dart';` |
-| `test/common/hongan_test.dart` | **新增** (+95) | 节点解析 / 配置生成测试 |
-| `test/widgets/profile_focus_test.dart` | 修改 (+16) | file profile 流量显示测试 |
+| `lib/common/hongan.dart` | **新增** | 面板 API：`login()` / `subscription()` / `servers()`；`buildHonganConfig()` 把明文节点表生成本地 mihomo 配置；`HonganAccount` 是同步要复用的凭据 |
+| `lib/views/profiles/hongan.dart` | **新增** | 「红岸账号导入」弹窗：邮箱/密码、加载态、错误提示 |
+| `lib/views/profiles/add.dart` | 修改 | 订阅页新增入口项；登录后交给 `addHonganProfile()` |
+| `lib/providers/actions/profiles.dart` | 修改 | 生成 file profile 并写入 `SubscriptionInfo`（用量/到期）；`syncHonganProfile()` 用同一套面板逻辑重建配置 |
+| `lib/views/profiles/profiles.dart` | 修改 | file profile 也显示流量用量；红岸配置的「同步」走红岸接口而不是订阅地址 |
+| `lib/common/preferences.dart` | 修改 | 红岸凭据（JWT / 订阅 token / uuid）落盘并缓存，供同步复用 |
+| `lib/common/constant.dart` | 修改 | 存储键 `hongan_accounts`；fork 仓库地址 |
+| `lib/common/common.dart` | 修改 | `export 'hongan.dart';` |
+| `lib/bootstrap.dart` | 修改 | 启动时载入红岸凭据缓存 |
+| `test/common/hongan_test.dart` | **新增** | 节点解析 / 配置生成 / 凭据序列化测试 |
+| `test/widgets/profile_focus_test.dart` | 修改 | file profile 流量显示测试 |
 
-这些改动的等价 `git diff` 单独放在 `patch/hongan-flclash.patch`，方便把它移植到**更新的上游版本**上。
+`patch/hongan-flclash.patch` 是本 fork 自身改动的 `git diff` 存档，只用于本 fork 内部核对与重放。
+红岸联动是 fork 专属能力，不向上游 `chen08209/FlClash` 提交，也不作为向新上游移植的素材。
 
 ### 1.2 说明 / 工具文件（不参与编译）
 
@@ -46,7 +52,7 @@
 | `README_UPSTREAM.md` | 改名 | 上游 FlClash 的原始 README（内容一字未改，仅改名，避免与本文件冲突） |
 | `HONGAN_ARCHITECTURE.md` | **新增** | 逆向分析：红岸 Windows 客户端到底是怎么拿到 Clash 配置的（组件、链路、内核 RPC、加密与内存取证、复现方法） |
 | `HONGAN_BUILD_LINUX.md` | **新增** | Linux 构建 / 子模块坑 / 使用 / 排错 |
-| `patch/hongan-flclash.patch` | **新增** | 上表 1.1 的 `git diff`（26837 B，842 行，LF） |
+| `patch/hongan-flclash.patch` | **新增** | 上表 1.1 的 `git diff`（39301 B，1222 行，LF，11 个文件） |
 | `tools/hongan_fetch.py` | **新增** | 纯 Python 标准库脚本：`/user/server/fetch` 明文节点表 / 免密读客户端凭据 / **uuid+模板** 兜底，`--discover`/`--verify` 用 mihomo 实测 |
 | `.gitignore` | 修改 | 追加一栏：**不要把抓下来的节点/订阅文件提交上来**（里面有你的账号凭据） |
 | `.gitmodules` | 修改 | 子模块 `core/Clash.Meta` 的 URL 由 SSH 改成 HTTPS（否则没配 GitHub key 的 Linux 机器拉不动） |
@@ -55,7 +61,7 @@
 
 ### 1.3 未改动、保持上游原样的关键文件
 
-`LICENSE`（GPL-3.0 原文）、`lib/core/`（内核控制）、`lib/providers/`、`lib/models/`、`core/`（Go 核心构建脚本）、
+`LICENSE`（GPL-3.0 原文）、`lib/core/`（内核控制）、`lib/models/`、`core/`（Go 核心构建脚本）、
 `services/helper/`（Rust Helper）、`pubspec.yaml`、l10n 生成物。**没有**新增 provider / model / 数据库字段，
 所以**不需要**重跑 `build_runner` 代码生成；也没有改 l10n，不会碰到生成文件。
 
@@ -77,6 +83,11 @@ GET  /api/v1/user/server/fetch          （Authorization = 裸 JWT）
 本地 buildHonganConfig() → mihomo YAML（proxies + groups + rules + dns）
         → 保存为 file profile，并把 u/d/transfer_enable 写进 SubscriptionInfo
 ```
+
+导入时会把 `email` / `JWT` / 订阅 token / `uuid` 存进 `SharedPreferences`（键 `hongan_accounts`，
+按 profile id 索引）。配置栏里红岸配置的「同步」不走 `Profile.update()` 的订阅下载，而是拿这份凭据
+重跑 `getSubscribe` + `server/fetch` + `buildHonganConfig()`，重新生成同一个 profile 的 YAML；
+`/user/info` 只是兜底，它失败不会让同步失败。删除红岸配置时凭据一并清掉。
 
 四个实测踩坑点，补丁里已经写死：
 

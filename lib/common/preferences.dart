@@ -13,6 +13,10 @@ class Preferences {
   static Preferences? _instance;
   var _store = ResolveOnce(_open);
 
+  /// Kept in memory so the profiles view can tell a HongAn profile apart
+  /// without waiting on the store.
+  Map<int, HonganAccount> _honganAccounts = const {};
+
   Future<bool> get isInit async => await _store.value != null;
 
   Preferences._internal();
@@ -28,6 +32,7 @@ class Preferences {
   @visibleForTesting
   Future<void> rebind() async {
     _store = ResolveOnce(_open);
+    _honganAccounts = const {};
     await _store.value;
   }
 
@@ -188,8 +193,72 @@ class Preferences {
   }
 
   Future<void> clearPreferences() async {
+    _honganAccounts = const {};
     final sharedPreferencesIns = await _store.value;
     await sharedPreferencesIns?.clear();
+  }
+
+  Map<int, HonganAccount> get honganAccounts => _honganAccounts;
+
+  Future<void> loadHonganAccounts() async {
+    final sharedPreferencesIns = await _store.value;
+    _honganAccounts = _decodeHonganAccounts(
+      sharedPreferencesIns?.getString(honganAccountsKey),
+    );
+  }
+
+  Future<void> saveHonganAccount(int profileId, HonganAccount account) async {
+    _honganAccounts = {..._honganAccounts, profileId: account};
+    await _saveHonganAccounts();
+  }
+
+  Future<void> removeHonganAccount(int profileId) async {
+    if (!_honganAccounts.containsKey(profileId)) {
+      return;
+    }
+    final accounts = {..._honganAccounts};
+    accounts.remove(profileId);
+    _honganAccounts = accounts;
+    await _saveHonganAccounts();
+  }
+
+  Future<void> _saveHonganAccounts() async {
+    final accounts = {
+      for (final entry in _honganAccounts.entries)
+        '${entry.key}': entry.value.toJson(),
+    };
+    final sharedPreferencesIns = await _store.value;
+    await sharedPreferencesIns?.setString(
+      honganAccountsKey,
+      json.encode(accounts),
+    );
+  }
+
+  Map<int, HonganAccount> _decodeHonganAccounts(String? raw) {
+    if (raw == null) {
+      return const {};
+    }
+    try {
+      final decoded = json.decode(raw);
+      if (decoded is! Map) {
+        return const {};
+      }
+      final accounts = <int, HonganAccount>{};
+      for (final MapEntry(:key, :value) in decoded.entries) {
+        final profileId = int.tryParse('$key');
+        final account = HonganAccount.fromJson(value);
+        if (profileId != null && account != null) {
+          accounts[profileId] = account;
+        }
+      }
+      return accounts;
+    } catch (e) {
+      commonPrint.log(
+        'decode hongan accounts error ${e.toString()}',
+        logLevel: LogLevel.warning,
+      );
+      return const {};
+    }
   }
 }
 

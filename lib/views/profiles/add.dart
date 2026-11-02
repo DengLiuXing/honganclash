@@ -114,12 +114,12 @@ class AddProfileMenu extends ConsumerWidget {
   }
 
   Future<void> _toHongan(BuildContext context, WidgetRef ref) async {
-    final subscription = await showHonganImportDialog(context: context);
-    if (subscription == null) {
+    final import = await showHonganImportDialog(context: context);
+    if (import == null) {
       return;
     }
     unawaited(
-      ref.read(profilesActionProvider.notifier).addHonganProfile(subscription),
+      ref.read(profilesActionProvider.notifier).addHonganProfile(import),
     );
   }
 

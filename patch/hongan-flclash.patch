@@ -1,3 +1,15 @@
+diff --git a/lib/bootstrap.dart b/lib/bootstrap.dart
+index ed0ca5d..2199028 100644
+--- a/lib/bootstrap.dart
++++ b/lib/bootstrap.dart
+@@ -102,6 +102,7 @@ class Bootstrap {
+     await _claimDataDirectory();
+     globalState.packageInfo = await PackageInfo.fromPlatform();
+     var config = await migration.run();
++    await preferences.loadHonganAccounts();
+     _bootDecision = await bootGuard.evaluate(
+       profileId: config.currentProfileId,
+     );
 diff --git a/lib/common/common.dart b/lib/common/common.dart
 index 1169f6f..e184861 100644
 --- a/lib/common/common.dart
@@ -11,25 +23,26 @@ index 1169f6f..e184861 100644
  export 'indexing.dart';
  export 'input_entries.dart';
 diff --git a/lib/common/constant.dart b/lib/common/constant.dart
-index f5b22e0..8344eb1 100644
+index f5b22e0..23e5de1 100644
 --- a/lib/common/constant.dart
 +++ b/lib/common/constant.dart
-@@ -121,7 +121,8 @@ const systemDnsRecordKey = 'system_dns_record';
+@@ -120,8 +120,9 @@ const configKey = 'config';
+ const systemDnsRecordKey = 'system_dns_record';
  const bootRecordKey = 'boot_record';
  const appliedConfigMd5Key = 'applied_config_md5';
++const honganAccountsKey = 'hongan_accounts';
  const defaultSystemDnsFallback = '223.5.5.5';
 -const repository = 'chen08209/FlClash';
-+const double dialogCommonWidth = 300;
 +const repository = 'DengLiuXing/honganclash';
  const maxMobileWidth = 600;
  const maxLaptopWidth = 840;
  const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 diff --git a/lib/common/hongan.dart b/lib/common/hongan.dart
 new file mode 100644
-index 0000000..bff2aa0
+index 0000000..330d179
 --- /dev/null
 +++ b/lib/common/hongan.dart
-@@ -0,0 +1,432 @@
+@@ -0,0 +1,484 @@
 +import 'dart:convert';
 +import 'dart:io';
 +
@@ -120,6 +133,49 @@ index 0000000..bff2aa0
 +  }
 +}
 +
++typedef HonganImport = ({
++  HonganSession session,
++  HonganSubscription subscription,
++});
++
++class HonganAccount {
++  final String email;
++  final String jwt;
++  final String subscriptionToken;
++  final String uuid;
++
++  const HonganAccount({
++    required this.email,
++    required this.jwt,
++    required this.subscriptionToken,
++    required this.uuid,
++  });
++
++  Map<String, Object?> toJson() => {
++    'email': email,
++    'jwt': jwt,
++    'token': subscriptionToken,
++    'uuid': uuid,
++  };
++
++  static HonganAccount? fromJson(Object? value) {
++    if (value is! Map) {
++      return null;
++    }
++    final email = _stringOf(value['email']);
++    final jwt = _stringOf(value['jwt']);
++    if (email == null || jwt == null) {
++      return null;
++    }
++    return HonganAccount(
++      email: email,
++      jwt: jwt,
++      subscriptionToken: _stringOf(value['token']) ?? '',
++      uuid: _stringOf(value['uuid']) ?? '',
++    );
++  }
++}
++
 +class HonganApi {
 +  HonganApi._();
 +
@@ -152,8 +208,7 @@ index 0000000..bff2aa0
 +    if (subscribeUrl == null) {
 +      throw const HonganApiException('面板未返回订阅地址，账号可能已到期');
 +    }
-+    // Some panel versions keep the quota and uuid only on /user/info.
-+    final info = _dataOf(await _request('/user/info', jwt: session.jwt));
++    final info = await _infoOf(session.jwt);
 +    final upload = _intOf(data['u']);
 +    final download = _intOf(data['d']);
 +    final transferEnable = _intOf(data['transfer_enable']);
@@ -196,6 +251,16 @@ index 0000000..bff2aa0
 +    }
 +    servers.sort((a, b) => a.port.compareTo(b.port));
 +    return servers;
++  }
++
++  /// Some panel versions keep the quota and uuid only on `/user/info`, which
++  /// only fills gaps: a panel answering it badly must not fail the refresh.
++  Future<Map<String, Object?>> _infoOf(String jwt) async {
++    try {
++      return _dataOf(await _request('/user/info', jwt: jwt));
++    } on HonganApiException {
++      return const {};
++    }
 +  }
 +
 +  Future<Map<String, Object?>> _request(
@@ -462,46 +527,288 @@ index 0000000..bff2aa0
 +  }
 +  return null;
 +}
+diff --git a/lib/common/preferences.dart b/lib/common/preferences.dart
+index 383abae..8d89834 100644
+--- a/lib/common/preferences.dart
++++ b/lib/common/preferences.dart
+@@ -13,6 +13,10 @@ class Preferences {
+   static Preferences? _instance;
+   var _store = ResolveOnce(_open);
+ 
++  /// Kept in memory so the profiles view can tell a HongAn profile apart
++  /// without waiting on the store.
++  Map<int, HonganAccount> _honganAccounts = const {};
++
+   Future<bool> get isInit async => await _store.value != null;
+ 
+   Preferences._internal();
+@@ -28,6 +32,7 @@ class Preferences {
+   @visibleForTesting
+   Future<void> rebind() async {
+     _store = ResolveOnce(_open);
++    _honganAccounts = const {};
+     await _store.value;
+   }
+ 
+@@ -188,9 +193,73 @@ class Preferences {
+   }
+ 
+   Future<void> clearPreferences() async {
++    _honganAccounts = const {};
+     final sharedPreferencesIns = await _store.value;
+     await sharedPreferencesIns?.clear();
+   }
++
++  Map<int, HonganAccount> get honganAccounts => _honganAccounts;
++
++  Future<void> loadHonganAccounts() async {
++    final sharedPreferencesIns = await _store.value;
++    _honganAccounts = _decodeHonganAccounts(
++      sharedPreferencesIns?.getString(honganAccountsKey),
++    );
++  }
++
++  Future<void> saveHonganAccount(int profileId, HonganAccount account) async {
++    _honganAccounts = {..._honganAccounts, profileId: account};
++    await _saveHonganAccounts();
++  }
++
++  Future<void> removeHonganAccount(int profileId) async {
++    if (!_honganAccounts.containsKey(profileId)) {
++      return;
++    }
++    final accounts = {..._honganAccounts};
++    accounts.remove(profileId);
++    _honganAccounts = accounts;
++    await _saveHonganAccounts();
++  }
++
++  Future<void> _saveHonganAccounts() async {
++    final accounts = {
++      for (final entry in _honganAccounts.entries)
++        '${entry.key}': entry.value.toJson(),
++    };
++    final sharedPreferencesIns = await _store.value;
++    await sharedPreferencesIns?.setString(
++      honganAccountsKey,
++      json.encode(accounts),
++    );
++  }
++
++  Map<int, HonganAccount> _decodeHonganAccounts(String? raw) {
++    if (raw == null) {
++      return const {};
++    }
++    try {
++      final decoded = json.decode(raw);
++      if (decoded is! Map) {
++        return const {};
++      }
++      final accounts = <int, HonganAccount>{};
++      for (final MapEntry(:key, :value) in decoded.entries) {
++        final profileId = int.tryParse('$key');
++        final account = HonganAccount.fromJson(value);
++        if (profileId != null && account != null) {
++          accounts[profileId] = account;
++        }
++      }
++      return accounts;
++    } catch (e) {
++      commonPrint.log(
++        'decode hongan accounts error ${e.toString()}',
++        logLevel: LogLevel.warning,
++      );
++      return const {};
++    }
++  }
+ }
+ 
+ final preferences = Preferences();
 diff --git a/lib/providers/actions/profiles.dart b/lib/providers/actions/profiles.dart
-index 78cdfdf..ece85d2 100644
+index 78cdfdf..eebb13d 100644
 --- a/lib/providers/actions/profiles.dart
 +++ b/lib/providers/actions/profiles.dart
-@@ -207,6 +207,46 @@ class ProfilesAction extends _$ProfilesAction {
+@@ -21,6 +21,7 @@ class ProfilesAction extends _$ProfilesAction {
+ 
+   Future<void> deleteProfile(int id) async {
+     await ref.read(profilesProvider.notifier).del(id);
++    await preferences.removeHonganAccount(id);
+     await clearEffect(id);
+     final currentProfileId = ref.read(currentProfileIdProvider);
+     if (currentProfileId == id) {
+@@ -147,35 +148,81 @@ class ProfilesAction extends _$ProfilesAction {
+       final updated = await profile.update(
+         validate: (path, key) => _core.validateProfile(path, key),
+       );
+-      // The download can take minutes; edits and deletes made meanwhile win.
+-      final latest = ref.read(profilesProvider).getProfile(profile.id);
+-      if (latest == null) {
+-        await clearEffect(profile.id);
+-        return;
++      await _finishProfileUpdate(profile, updated);
++    } finally {
++      if (operation != null) {
++        ref
++            .read(updatingKeysProvider.notifier)
++            .stop(profile.updatingKey, operation);
+       }
+-      final newProfile = latest.copyWith(
+-        label: latest.label.takeFirstValid([updated.label]),
+-        subscriptionInfo: updated.subscriptionInfo,
+-        lastUpdateDate: updated.lastUpdateDate,
++    }
++  }
++
++  /// A refresh can take minutes; edits and deletes made meanwhile win.
++  Future<void> _finishProfileUpdate(Profile profile, Profile updated) async {
++    final latest = ref.read(profilesProvider).getProfile(profile.id);
++    if (latest == null) {
++      await clearEffect(profile.id);
++      return;
++    }
++    final newProfile = latest.copyWith(
++      label: latest.label.takeFirstValid([updated.label]),
++      subscriptionInfo: updated.subscriptionInfo,
++      lastUpdateDate: updated.lastUpdateDate,
++    );
++    ref.read(profilesProvider.notifier).put(newProfile);
++    if (profile.id == ref.read(currentProfileIdProvider)) {
++      ref
++          .read(setupActionProvider.notifier)
++          .applyProfileDebounce(silence: true);
++    } else {
++      final label = ref
++          .read(profilesProvider.notifier)
++          .labeled(newProfile)
++          .realLabel;
++      unawaited(
++        ref.read(clashProvidersActionProvider.notifier).applyIfReferenced(
++          ProviderKind.proxy,
++          {label},
++          force: true,
++        ),
+       );
+-      ref.read(profilesProvider.notifier).put(newProfile);
+-      if (profile.id == ref.read(currentProfileIdProvider)) {
+-        ref
+-            .read(setupActionProvider.notifier)
+-            .applyProfileDebounce(silence: true);
+-      } else {
+-        final label = ref
+-            .read(profilesProvider.notifier)
+-            .labeled(newProfile)
+-            .realLabel;
+-        unawaited(
+-          ref.read(clashProvidersActionProvider.notifier).applyIfReferenced(
+-            ProviderKind.proxy,
+-            {label},
+-            force: true,
+-          ),
+-        );
++    }
++  }
++
++  /// Rebuilds [profile] from the panel with the credentials it kept, instead
++  /// of downloading its subscription URL.
++  Future<void> syncHonganProfile(
++    Profile profile, {
++    bool showLoading = false,
++  }) async {
++    final account = preferences.honganAccounts[profile.id];
++    if (account == null) {
++      throw const HonganApiException('未找到红岸账号信息，请重新导入');
++    }
++    final operation = showLoading
++        ? ref.read(updatingKeysProvider.notifier).start(profile.updatingKey)
++        : null;
++    try {
++      ref.read(profilesProvider.notifier).put(profile);
++      final subscription = await honganApi.subscription(
++        HonganSession(
++          email: account.email,
++          subscriptionToken: account.subscriptionToken,
++          jwt: account.jwt,
++        ),
++      );
++      final servers = await honganApi.servers(jwt: account.jwt);
++      if (servers.isEmpty) {
++        throw const HonganApiException('面板没有在线节点');
+       }
++      final saved = await _writeHonganProfile(
++        profile,
++        uuid: subscription.uuid ?? account.uuid,
++        subscription: subscription,
++        servers: servers,
++      );
++      await _finishProfileUpdate(profile, saved);
+     } finally {
+       if (operation != null) {
+         ref
+@@ -185,6 +232,33 @@ class ProfilesAction extends _$ProfilesAction {
      }
    }
  
-+  Future<void> addHonganProfile(HonganSubscription subscription) async {
-+    _showProfiles();
-+    final profile = await globalState.loadingRun(
-+      tag: LoadingTag.profiles,
-+      () async {
-+        if (subscription.jwt.isEmpty) {
-+          throw const HonganApiException('登录状态已失效，请重新登录');
-+        }
-+        final uuid = subscription.uuid;
-+        if (uuid == null || uuid.isEmpty) {
-+          throw const HonganApiException('面板未返回账号 uuid');
-+        }
-+        final servers = await honganApi.servers(jwt: subscription.jwt);
-+        if (servers.isEmpty) {
-+          throw const HonganApiException('面板没有在线节点');
-+        }
-+        final next = Profile.normal(label: '红岸云').copyWith(
-+          autoUpdate: false,
++  Future<Profile> _writeHonganProfile(
++    Profile profile, {
++    required String uuid,
++    required HonganSubscription subscription,
++    required List<HonganServer> servers,
++  }) {
++    if (uuid.isEmpty) {
++      throw const HonganApiException('面板未返回账号 uuid');
++    }
++    final expire = subscription.expiredAt?.millisecondsSinceEpoch ?? 0;
++    return profile
++        .copyWith(
 +          subscriptionInfo: SubscriptionInfo(
 +            upload: subscription.upload,
 +            download: subscription.download,
 +            total: subscription.transferEnable,
-+            expire:
-+                (subscription.expiredAt?.millisecondsSinceEpoch ?? 0) ~/ 1000,
++            expire: expire ~/ 1000,
 +          ),
-+        );
-+        return next.saveFile(
++        )
++        .saveFile(
 +          Uint8List.fromList(
 +            utf8.encode(buildHonganConfig(servers: servers, uuid: uuid)),
 +          ),
 +          validate: (path, key) => _core.validateProfile(path, key),
 +        );
++  }
++
+   Future<void> addProfileFormFile() async {
+     final platformFile = await globalState.safeRun(picker.pickerFile);
+     if (platformFile == null) return;
+@@ -207,6 +281,41 @@ class ProfilesAction extends _$ProfilesAction {
+     }
+   }
+ 
++  Future<void> addHonganProfile(HonganImport import) async {
++    _showProfiles();
++    final (:session, :subscription) = import;
++    final profile = await globalState.loadingRun(
++      tag: LoadingTag.profiles,
++      () async {
++        if (session.jwt.isEmpty) {
++          throw const HonganApiException('登录状态已失效，请重新登录');
++        }
++        final servers = await honganApi.servers(jwt: session.jwt);
++        if (servers.isEmpty) {
++          throw const HonganApiException('面板没有在线节点');
++        }
++        final saved = await _writeHonganProfile(
++          Profile.normal(label: '红岸云').copyWith(autoUpdate: false),
++          uuid: subscription.uuid ?? '',
++          subscription: subscription,
++          servers: servers,
++        );
++        final account = HonganAccount(
++          email: session.email,
++          jwt: session.jwt,
++          subscriptionToken: session.subscriptionToken,
++          uuid: subscription.uuid ?? '',
++        );
++        await preferences.saveHonganAccount(saved.id, account);
++        return saved;
 +      },
 +      title: currentAppLocalizations.addProfile,
 +    );
@@ -514,7 +821,7 @@ index 78cdfdf..ece85d2 100644
      final profile = Profile.custom(label: label);
      putProfile(profile);
 diff --git a/lib/views/profiles/add.dart b/lib/views/profiles/add.dart
-index c72fdb9..5eea74f 100644
+index c72fdb9..9dd657f 100644
 --- a/lib/views/profiles/add.dart
 +++ b/lib/views/profiles/add.dart
 @@ -6,6 +6,7 @@ import 'package:fl_clash/plugins/app.dart';
@@ -530,12 +837,12 @@ index c72fdb9..5eea74f 100644
    }
  
 +  Future<void> _toHongan(BuildContext context, WidgetRef ref) async {
-+    final subscription = await showHonganImportDialog(context: context);
-+    if (subscription == null) {
++    final import = await showHonganImportDialog(context: context);
++    if (import == null) {
 +      return;
 +    }
 +    unawaited(
-+      ref.read(profilesActionProvider.notifier).addHonganProfile(subscription),
++      ref.read(profilesActionProvider.notifier).addHonganProfile(import),
 +    );
 +  }
 +
@@ -557,20 +864,20 @@ index c72fdb9..5eea74f 100644
                glyph: AppGlyphs.devices,
 diff --git a/lib/views/profiles/hongan.dart b/lib/views/profiles/hongan.dart
 new file mode 100644
-index 0000000..9d91913
+index 0000000..8550eac
 --- /dev/null
 +++ b/lib/views/profiles/hongan.dart
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,138 @@
 +import 'dart:async';
 +
 +import 'package:fl_clash/common/common.dart';
 +import 'package:fl_clash/widgets/widgets.dart';
 +import 'package:material_ui/material_ui.dart';
 +
-+/// Signs in to the HongAn (红岸) panel and returns the subscription the panel
-+/// issues, or null when the user cancels.
-+Future<HonganSubscription?> showHonganImportDialog({BuildContext? context}) {
-+  return dialogs.showCommonDialog<HonganSubscription>(
++/// Signs in to the HongAn (红岸) panel and returns what the panel issues, or
++/// null when the user cancels.
++Future<HonganImport?> showHonganImportDialog({BuildContext? context}) {
++  return dialogs.showCommonDialog<HonganImport>(
 +    context: context,
 +    child: const _HonganImportDialog(key: ValueKey('hongan-import')),
 +  );
@@ -623,7 +930,8 @@ index 0000000..9d91913
 +      if (!mounted) {
 +        return;
 +      }
-+      Navigator.of(context).pop(subscription);
++      final result = (session: session, subscription: subscription);
++      Navigator.of(context).pop(result);
 +    } on HonganApiException catch (error) {
 +      if (!mounted) {
 +        return;
@@ -699,10 +1007,58 @@ index 0000000..9d91913
 +  }
 +}
 diff --git a/lib/views/profiles/profiles.dart b/lib/views/profiles/profiles.dart
-index 7d4c0ca..f33ff08 100644
+index 7d4c0ca..ecd6a41 100644
 --- a/lib/views/profiles/profiles.dart
 +++ b/lib/views/profiles/profiles.dart
-@@ -322,8 +322,7 @@ class ProfileItem extends ConsumerWidget {
+@@ -27,6 +27,10 @@ double get _profileItemHeight {
+       2 * listRowVerticalPadding;
+ }
+ 
++/// A HongAn profile refreshes from the panel, not from its subscription URL.
++bool _isHonganProfile(Profile profile) =>
++    preferences.honganAccounts.containsKey(profile.id);
++
+ class ProfilesView extends ConsumerStatefulWidget {
+   const ProfilesView({super.key, this.picker = false});
+ 
+@@ -49,9 +53,14 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
+     final profilesAction = ref.read(profilesActionProvider.notifier);
+     final List<UpdatingMessage> messages = [];
+     final updateProfiles = profiles.map<Future>((profile) async {
+-      if (profile.type != ProfileType.url) return;
++      final isHongan = _isHonganProfile(profile);
++      if (!isHongan && profile.type != ProfileType.url) return;
+       try {
+-        await profilesAction.updateProfile(profile, showLoading: true);
++        if (isHongan) {
++          await profilesAction.syncHonganProfile(profile, showLoading: true);
++        } else {
++          await profilesAction.updateProfile(profile, showLoading: true);
++        }
+       } catch (e) {
+         messages.add(
+           UpdatingMessage(
+@@ -307,11 +316,15 @@ class ProfileItem extends ConsumerWidget {
+   }
+ 
+   Future updateProfile(WidgetRef ref) async {
+-    if (profile.type != ProfileType.url) return;
++    final isHongan = _isHonganProfile(profile);
++    if (!isHongan && profile.type != ProfileType.url) return;
+     await globalState.loadingRun(() async {
+-      await ref
+-          .read(profilesActionProvider.notifier)
+-          .updateProfile(profile, showLoading: true);
++      final profilesAction = ref.read(profilesActionProvider.notifier);
++      if (isHongan) {
++        await profilesAction.syncHonganProfile(profile, showLoading: true);
++      } else {
++        await profilesAction.updateProfile(profile, showLoading: true);
++      }
+     }, tag: LoadingTag.profiles);
+   }
+ 
+@@ -322,8 +335,7 @@ class ProfileItem extends ConsumerWidget {
      );
    }
  
@@ -712,12 +1068,21 @@ index 7d4c0ca..f33ff08 100644
  
    String _subtitle(BuildContext context) {
      final info = _subscriptionInfo;
+@@ -435,7 +447,7 @@ class ProfileItem extends ConsumerWidget {
+             _handlePushGenProfilePage(context, profile.id);
+           },
+         ),
+-      if (isUrl)
++      if (isUrl || _isHonganProfile(profile))
+         CommonPopupMenuItem(
+           glyph: AppGlyphs.sync,
+           label: appLocalizations.sync,
 diff --git a/test/common/hongan_test.dart b/test/common/hongan_test.dart
 new file mode 100644
-index 0000000..baaf3e7
+index 0000000..bc8061e
 --- /dev/null
 +++ b/test/common/hongan_test.dart
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,110 @@
 +import 'package:fl_clash/common/hongan.dart';
 +import 'package:flutter_test/flutter_test.dart';
 +
@@ -811,6 +1176,21 @@ index 0000000..baaf3e7
 +    expect(config, contains('skip-cert-verify: true'));
 +    expect(config, contains('  - name: 自动选择'));
 +    expect(config, contains('MATCH,漏网之鱼'));
++  });
++
++  test('HonganAccount keeps what a refresh needs', () {
++    const account = HonganAccount(
++      email: 'a@b.c',
++      jwt: 'jwt-1',
++      subscriptionToken: 'token-1',
++      uuid: 'uuid-1',
++    );
++    final decoded = HonganAccount.fromJson(account.toJson());
++    expect(decoded?.email, 'a@b.c');
++    expect(decoded?.jwt, 'jwt-1');
++    expect(decoded?.subscriptionToken, 'token-1');
++    expect(decoded?.uuid, 'uuid-1');
++    expect(HonganAccount.fromJson({'email': 'a@b.c'}), isNull);
 +  });
 +}
 diff --git a/test/widgets/profile_focus_test.dart b/test/widgets/profile_focus_test.dart

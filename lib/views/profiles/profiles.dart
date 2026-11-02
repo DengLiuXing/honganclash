@@ -27,6 +27,10 @@ double get _profileItemHeight {
       2 * listRowVerticalPadding;
 }
 
+/// A HongAn profile refreshes from the panel, not from its subscription URL.
+bool _isHonganProfile(Profile profile) =>
+    preferences.honganAccounts.containsKey(profile.id);
+
 class ProfilesView extends ConsumerStatefulWidget {
   const ProfilesView({super.key, this.picker = false});
 
@@ -49,9 +53,14 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
     final profilesAction = ref.read(profilesActionProvider.notifier);
     final List<UpdatingMessage> messages = [];
     final updateProfiles = profiles.map<Future>((profile) async {
-      if (profile.type != ProfileType.url) return;
+      final isHongan = _isHonganProfile(profile);
+      if (!isHongan && profile.type != ProfileType.url) return;
       try {
-        await profilesAction.updateProfile(profile, showLoading: true);
+        if (isHongan) {
+          await profilesAction.syncHonganProfile(profile, showLoading: true);
+        } else {
+          await profilesAction.updateProfile(profile, showLoading: true);
+        }
       } catch (e) {
         messages.add(
           UpdatingMessage(
@@ -307,11 +316,15 @@ class ProfileItem extends ConsumerWidget {
   }
 
   Future updateProfile(WidgetRef ref) async {
-    if (profile.type != ProfileType.url) return;
+    final isHongan = _isHonganProfile(profile);
+    if (!isHongan && profile.type != ProfileType.url) return;
     await globalState.loadingRun(() async {
-      await ref
-          .read(profilesActionProvider.notifier)
-          .updateProfile(profile, showLoading: true);
+      final profilesAction = ref.read(profilesActionProvider.notifier);
+      if (isHongan) {
+        await profilesAction.syncHonganProfile(profile, showLoading: true);
+      } else {
+        await profilesAction.updateProfile(profile, showLoading: true);
+      }
     }, tag: LoadingTag.profiles);
   }
 
@@ -434,7 +447,7 @@ class ProfileItem extends ConsumerWidget {
             _handlePushGenProfilePage(context, profile.id);
           },
         ),
-      if (isUrl)
+      if (isUrl || _isHonganProfile(profile))
         CommonPopupMenuItem(
           glyph: AppGlyphs.sync,
           label: appLocalizations.sync,

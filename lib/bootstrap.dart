@@ -102,6 +102,7 @@ class Bootstrap {
     await _claimDataDirectory();
     globalState.packageInfo = await PackageInfo.fromPlatform();
     var config = await migration.run();
+    await preferences.loadHonganAccounts();
     _bootDecision = await bootGuard.evaluate(
       profileId: config.currentProfileId,
     );

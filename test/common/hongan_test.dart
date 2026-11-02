@@ -92,4 +92,19 @@ void main() {
     expect(config, contains('  - name: 自动选择'));
     expect(config, contains('MATCH,漏网之鱼'));
   });
+
+  test('HonganAccount keeps what a refresh needs', () {
+    const account = HonganAccount(
+      email: 'a@b.c',
+      jwt: 'jwt-1',
+      subscriptionToken: 'token-1',
+      uuid: 'uuid-1',
+    );
+    final decoded = HonganAccount.fromJson(account.toJson());
+    expect(decoded?.email, 'a@b.c');
+    expect(decoded?.jwt, 'jwt-1');
+    expect(decoded?.subscriptionToken, 'token-1');
+    expect(decoded?.uuid, 'uuid-1');
+    expect(HonganAccount.fromJson({'email': 'a@b.c'}), isNull);
+  });
 }

@@ -88,6 +88,49 @@ class HonganSubscription {
   }
 }
 
+typedef HonganImport = ({
+  HonganSession session,
+  HonganSubscription subscription,
+});
+
+class HonganAccount {
+  final String email;
+  final String jwt;
+  final String subscriptionToken;
+  final String uuid;
+
+  const HonganAccount({
+    required this.email,
+    required this.jwt,
+    required this.subscriptionToken,
+    required this.uuid,
+  });
+
+  Map<String, Object?> toJson() => {
+    'email': email,
+    'jwt': jwt,
+    'token': subscriptionToken,
+    'uuid': uuid,
+  };
+
+  static HonganAccount? fromJson(Object? value) {
+    if (value is! Map) {
+      return null;
+    }
+    final email = _stringOf(value['email']);
+    final jwt = _stringOf(value['jwt']);
+    if (email == null || jwt == null) {
+      return null;
+    }
+    return HonganAccount(
+      email: email,
+      jwt: jwt,
+      subscriptionToken: _stringOf(value['token']) ?? '',
+      uuid: _stringOf(value['uuid']) ?? '',
+    );
+  }
+}
+
 class HonganApi {
   HonganApi._();
 
@@ -120,8 +163,7 @@ class HonganApi {
     if (subscribeUrl == null) {
       throw const HonganApiException('面板未返回订阅地址，账号可能已到期');
     }
-    // Some panel versions keep the quota and uuid only on /user/info.
-    final info = _dataOf(await _request('/user/info', jwt: session.jwt));
+    final info = await _infoOf(session.jwt);
     final upload = _intOf(data['u']);
     final download = _intOf(data['d']);
     final transferEnable = _intOf(data['transfer_enable']);
@@ -164,6 +206,16 @@ class HonganApi {
     }
     servers.sort((a, b) => a.port.compareTo(b.port));
     return servers;
+  }
+
+  /// Some panel versions keep the quota and uuid only on `/user/info`, which
+  /// only fills gaps: a panel answering it badly must not fail the refresh.
+  Future<Map<String, Object?>> _infoOf(String jwt) async {
+    try {
+      return _dataOf(await _request('/user/info', jwt: jwt));
+    } on HonganApiException {
+      return const {};
+    }
   }
 
   Future<Map<String, Object?>> _request(

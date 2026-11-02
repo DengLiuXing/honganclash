@@ -4,10 +4,10 @@ import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// Signs in to the HongAn (红岸) panel and returns the subscription the panel
-/// issues, or null when the user cancels.
-Future<HonganSubscription?> showHonganImportDialog({BuildContext? context}) {
-  return dialogs.showCommonDialog<HonganSubscription>(
+/// Signs in to the HongAn (红岸) panel and returns what the panel issues, or
+/// null when the user cancels.
+Future<HonganImport?> showHonganImportDialog({BuildContext? context}) {
+  return dialogs.showCommonDialog<HonganImport>(
     context: context,
     child: const _HonganImportDialog(key: ValueKey('hongan-import')),
   );
@@ -60,7 +60,8 @@ class _HonganImportDialogState extends State<_HonganImportDialog> {
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pop(subscription);
+      final result = (session: session, subscription: subscription);
+      Navigator.of(context).pop(result);
     } on HonganApiException catch (error) {
       if (!mounted) {
         return;
