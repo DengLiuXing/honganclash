@@ -1,6 +1,6 @@
 # 红岸 macOS 客户端：YAML 到底怎么拿
 
-分析对象：`/home/dlx/下载/hongan-macos-universal.pkg`
+分析对象：红岸 macOS 官方安装包 `hongan-macos-universal.pkg`（下载目录自定）
 SHA-256：`245aa4a4b3b9e8a5612b5a5082d50cddb3d8472ab79060642d9d5068950a27f0`
 版本：`红岸加速器.app` 2.2.8（CFBundleVersion `2026040812`，bundle id `com.hongan.seppd`）
 
