@@ -13,9 +13,11 @@
 
 - 上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta[.N]`（例如上游 `0.9.2` → `0.9.2-honganBeta`）。
 - `.upstream-version` 记录当前上游版本；`pubspec.yaml` 的 build number 保持 `YYYYMMDDNN`。
-- `tool/fork_version.sh` 生成 fork 版本；tag 必须是 `vX.Y.Z-honganBeta[.N]`，CI 用
-  `tool/check_fork_version.sh` 校验。
+- `tool/release.sh pre --push` 发布 `vX.Y.Z-honganBeta.N`；`tool/fork_version.sh` 只负责把
+  `pubspec.yaml` 的 app version 对齐 `.upstream-version`。CI 用 `tool/check_fork_version.sh` 校验 tag。
 - `-honganBeta` 发布是 GitHub prerelease，稳定通道不会自动提示；需要手动从 release 页下载。
+- RPM/Windows 安装器不接受 semver 的 `-` 后缀，release workflow 在打包前会把包版本归一化为
+  `X.Y.Z+build`；tag/Release 仍是 `X.Y.Z-honganBeta.N`，App 内显示 `X.Y.Z`。
 
 ---
 

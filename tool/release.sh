@@ -15,20 +15,20 @@ usage() {
   cat <<'EOF'
 Usage: tool/release.sh <pre|stable> [options]
 
-  pre                Tag the next vX.Y.Z-pre.N prerelease.
-  stable             Write the changelog, commit it, and tag vX.Y.Z.
+  pre                Tag the next vX.Y.Z-honganBeta.N prerelease.
+  stable             Write the changelog, commit it, and tag vX.Y.Z-honganBeta.
 
 Options:
-  --version X.Y.Z    Target app version. Defaults to the pubspec version,
-                     bumping the patch when that version is already tagged.
+  --version X.Y.Z    Target app version. Defaults to the pubspec version, and
+                     must match .upstream-version.
   --push             Push the branch and the tag once the local steps pass.
   --yes              Skip the confirmation prompt.
   --dry-run          Report the plan and exit without changing anything.
   -h, --help         Show this help.
 
 Examples:
-  tool/release.sh pre --push          # v0.8.97-pre.1, notes rendered by CI
-  tool/release.sh stable --push       # v0.8.97 with a chore(release) commit
+  tool/release.sh pre --push          # v0.9.2-honganBeta.1, notes rendered by CI
+  tool/release.sh stable --push       # v0.9.2-honganBeta with a release commit
 EOF
 }
 
@@ -90,44 +90,36 @@ fi
 current="$(pubspec_version)"
 [[ -n "$current" ]] || die "could not read the version from pubspec.yaml"
 
-bumped=0
-if [[ -n "$want_version" ]]; then
-  version="$want_version"
-elif git rev-parse -q --verify "refs/tags/v$current" >/dev/null; then
-  IFS='.' read -r vmaj vmin vpat <<<"$current"
-  version="$vmaj.$vmin.$((vpat + 1))"
-  echo "pubspec is at $current, which is already tagged; targeting $version"
-else
-  version="$current"
-fi
+# The app version tracks the imported upstream snapshot, and the release build
+# rejects any tag whose version differs from it, so a release starts by bumping
+# .upstream-version (see tool/fork_version.sh) rather than this script.
+upstream="$(tr -d '[:space:]' <"$root/.upstream-version")"
+version="${want_version:-$current}"
+[[ "$version" == "$upstream" ]] ||
+  die "app version $version must equal .upstream-version ($upstream); tool/check_fork_version.sh would reject the tag"
 
-git rev-parse -q --verify "refs/tags/v$version" >/dev/null &&
-  die "v$version is already tagged; pass --version with the next one"
-
-if [[ "$version" != "$current" ]]; then
-  bumped=1
-fi
-
+base="v$version-honganBeta"
 if [[ "$mode" == "pre" ]]; then
-  last="$(git tag --list "v$version-pre.*" |
-    sed -n "s/^v$version-pre\.\([0-9]*\)$/\1/p" | sort -n | tail -1)"
-  tag="v$version-pre.$(((${last:-0}) + 1))"
+  last="$(git tag --list "$base.*" |
+    sed -n 's/.*\.\([0-9]*\)$/\1/p' | sort -n | tail -1)"
+  tag="$base.$(((${last:-0}) + 1))"
 else
-  tag="v$version"
+  git rev-parse -q --verify "refs/tags/$base" >/dev/null &&
+    die "$base is already tagged; bump .upstream-version for a new release"
+  tag="$base"
 fi
 
 echo
 echo "mode      : $mode"
 echo "branch    : $branch"
-echo "version   : $current -> $version$([[ $bumped == 1 ]] && echo ' (pubspec will be rewritten)')"
+echo "version   : $version"
 echo "tag       : $tag"
 if [[ "$mode" == "pre" ]]; then
   echo "changelog : rendered by CI from build --unreleased; nothing committed"
-  echo "publishes : build artifacts + Telegram only, no GitHub release"
 else
   echo "changelog : CHANGELOG.md + changelog.json regenerated and committed"
-  echo "publishes : GitHub release with artifacts, SHA256SUMS, Homebrew cask"
 fi
+echo "publishes : GitHub prerelease with artifacts and SHA256SUMS"
 echo "push      : $([[ $do_push == 1 ]] && echo yes || echo 'no (printed at the end)')"
 echo
 
@@ -138,10 +130,6 @@ restore() {
 }
 trap restore EXIT
 
-if ((bumped)); then
-  sed -i.bak "s/^version: [0-9]*\.[0-9]*\.[0-9]*/version: $version/" pubspec.yaml
-  rm -f pubspec.yaml.bak
-fi
 tool/bump_version.sh minor
 
 echo "--- release notes for $tag ---"

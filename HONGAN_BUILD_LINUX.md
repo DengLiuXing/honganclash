@@ -99,20 +99,15 @@ App 的更新检查已经指向本仓库（`lib/common/constant.dart` 的 `repos
 才会出现更新提示。
 
 ```bash
-# .upstream-version = 0.9.2 → 0.9.2-honganBeta+build
+# 对齐 .upstream-version；tool/release.sh 会 bump build、提交、打 tag 并推送
 tool/fork_version.sh
-
-# 只提交版本号，避免把工作区里未完成的改动一起带进 release
-git add pubspec.yaml
-git commit -m "chore(release): v0.9.2-honganBeta"
-git tag v0.9.2-honganBeta
-git push origin main
-git push origin v0.9.2-honganBeta
+tool/release.sh pre --push
 ```
 
-- 版本规则：上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta[.N]`；tag 必须是
-  `vX.Y.Z-honganBeta[.N]`，CI 用 `tool/check_fork_version.sh` 校验。
+- 版本规则：上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta[.N]`；重复构建同一上游用 `.1`、`.2`，
+  CI 用 `tool/check_fork_version.sh` 校验 tag。
 - `-honganBeta` 发布会标记为 GitHub prerelease，稳定通道不会自动提示。
+- RPM/Windows 安装器不接受 `-` 后缀；release workflow 打包前会把包版本归一化为 `X.Y.Z+build`。
 - tag push 会触发 `build.yaml`，构建并发布：
   - Linux amd64：deb / AppImage / rpm
   - Windows amd64：exe / zip
@@ -152,7 +147,7 @@ rm -rf .dart_tool/setup_build_cache
 ```bash
 dart format --output=none --set-exit-if-changed lib test tool plugins setup.dart
 flutter analyze --no-fatal-infos
-flutter test
+dart run tool/test.dart
 ```
 
 > ⚠️ 本补丁**没有在这些检查下跑过**（生成补丁的机器上没有 Dart/Flutter 工具链）。

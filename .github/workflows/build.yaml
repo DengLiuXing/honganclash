@@ -26,6 +26,7 @@ jobs:
     # started by hand.
     if: &checks github.event_name == 'workflow_dispatch' || !github.event.repository.private
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,8 +70,11 @@ jobs:
         continue-on-error: true
         run: dart run tool/changelog.dart verify
 
+      # tool/test.dart bundles the files into 32 entrypoints and re-runs any file
+      # that only failed next to others on its own, so a shared-isolate clash
+      # does not fail the run; plain `flutter test` starts one program per file.
       - name: Run tests
-        run: flutter test --reporter expanded --coverage
+        run: dart run tool/test.dart -- --reporter expanded --coverage
 
       - name: Check coverage
         run: dart run tool/check_coverage.dart coverage/lcov.info 75
@@ -382,8 +386,22 @@ jobs:
         if: matrix.platform == 'macos' && matrix.arch == 'amd64'
         run: plutil -replace FLTEnableImpeller -bool NO macos/Runner/Info.plist
 
+      # Windows defaults to pwsh, where `${GITHUB_REF_NAME}` is an empty shell
+      # variable rather than the environment variable bash sees.
       - name: Validate fork version
+        shell: bash
         run: bash tool/check_fork_version.sh "${GITHUB_REF_NAME}"
+
+      # RPM and the Windows installer reject the semver prerelease suffix.
+      - name: Normalize beta package version
+        if: env.IS_BETA == 'true'
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version: //p' pubspec.yaml)"
+          base="${version%%-*}"
+          build="${version##*+}"
+          sed -i "s/^version: .*/version: ${base}+${build}/" pubspec.yaml
+          grep '^version:' pubspec.yaml
 
       - name: Setup
         run: dart setup.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v

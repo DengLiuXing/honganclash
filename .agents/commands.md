@@ -279,7 +279,7 @@ the patch when pubspec still names an already tagged one), prints the notes the 
 
 ```bash
 tool/release.sh pre --dry-run     # plan and notes, changes nothing
-tool/release.sh pre --push        # bump, tag vX.Y.Z-pre.N, push
+tool/release.sh pre --push        # bump, tag vX.Y.Z-honganBeta.N, push
 tool/release.sh stable --push     # changelog, chore(release) commit, tag, push
 ```
 

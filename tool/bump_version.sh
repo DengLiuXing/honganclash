@@ -20,7 +20,7 @@ if [[ "$mode" != "major" && "$mode" != "minor" && "$mode" != "all" ]]; then
   exit 64
 fi
 
-version_line="$(grep -E '^version: [0-9]+\.[0-9]+\.[0-9]+\+[0-9]{10}$' "$pubspec_file" || true)"
+version_line="$(grep -E '^version: [0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?\+[0-9]{10}$' "$pubspec_file" || true)"
 if [[ -z "$version_line" ]]; then
   echo "No valid version line found in $pubspec_file" >&2
   exit 1
@@ -30,10 +30,19 @@ version="${version_line#version: }"
 app_version="${version%%+*}"
 build_number="${version##*+}"
 
+# The fork keeps its channel as a pre-release suffix (0.9.2-honganBeta), so the
+# numbers move on their own and the suffix is put back verbatim.
+app_number="${app_version%%-*}"
+app_suffix=""
+if [[ "$app_version" == *-* ]]; then
+  app_suffix="-${app_version#*-}"
+fi
+
 if [[ "$mode" == "major" || "$mode" == "all" ]]; then
-  IFS='.' read -r major minor patch <<<"$app_version"
+  IFS='.' read -r major minor patch <<<"$app_number"
   patch=$((patch + 1))
-  app_version="$major.$minor.$patch"
+  app_number="$major.$minor.$patch"
+  app_version="$app_number$app_suffix"
 fi
 
 if [[ "$mode" == "minor" || "$mode" == "all" ]]; then
