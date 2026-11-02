@@ -99,24 +99,26 @@ App 的更新检查已经指向本仓库（`lib/common/constant.dart` 的 `repos
 才会出现更新提示。
 
 ```bash
-# 先把版本号从 0.9.2 往上 bump，否则新包自己还会提示“有新版本”
-tool/bump_version.sh all
+# .upstream-version = 0.9.2 → 0.9.2-honganBeta+build
+tool/fork_version.sh
 
 # 只提交版本号，避免把工作区里未完成的改动一起带进 release
 git add pubspec.yaml
-git commit -m "chore(release): v0.9.3"
-git tag v0.9.3
+git commit -m "chore(release): v0.9.2-honganBeta"
+git tag v0.9.2-honganBeta
 git push origin main
-git push origin v0.9.3
+git push origin v0.9.2-honganBeta
 ```
 
-- tag 必须是纯 `vX.Y.Z`；`v0.9.1-pre.1` 不会创建 release，因为 App 的版本比较不认后缀。
+- 版本规则：上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta[.N]`；tag 必须是
+  `vX.Y.Z-honganBeta[.N]`，CI 用 `tool/check_fork_version.sh` 校验。
+- `-honganBeta` 发布会标记为 GitHub prerelease，稳定通道不会自动提示。
 - tag push 会触发 `build.yaml`，构建并发布：
   - Linux amd64：deb / AppImage / rpm
   - Windows amd64：exe / zip
   - macOS arm64 + amd64：dmg
 - 所有产物和 `SHA256SUMS` 会放进同一个 GitHub Release。
-- **Android 暂不包含**：发布 APK 需要 `KEYSTORE` / `SERVICE_JSON` / 签名密码等 secrets，当前仓库没有配置。
+- **Android 暂不包含**：发布 APK 需要 `android/app/keystore.jks` 和签名密码；当前 release 保持桌面三平台。
   Android 的单元测试和 debug 编译检查仍然保留在 `build.yaml` 里。
 - `build.yaml` 的 release job 不依赖 Dart/Go/Rust 检查 job，所以某个检查失败不会挡住安装包发布；
   检查结果仍然会单独显示。

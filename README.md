@@ -9,6 +9,14 @@
 - 本仓库相对上游的全部代码改动：**9 个文件，+741 行，-3 行**（含测试；另加若干说明与工具文件，见下表）
 - 许可：**GPL-3.0**（继承上游，`LICENSE` 原文未改）
 
+## 版本规则
+
+- 上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta[.N]`（例如上游 `0.9.2` → `0.9.2-honganBeta`）。
+- `.upstream-version` 记录当前上游版本；`pubspec.yaml` 的 build number 保持 `YYYYMMDDNN`。
+- `tool/fork_version.sh` 生成 fork 版本；tag 必须是 `vX.Y.Z-honganBeta[.N]`，CI 用
+  `tool/check_fork_version.sh` 校验。
+- `-honganBeta` 发布是 GitHub prerelease，稳定通道不会自动提示；需要手动从 release 页下载。
+
 ---
 
 ## 1. 本仓库额外添加 / 修改的文件（重点）
@@ -107,8 +115,8 @@ dart setup.dart linux
 > 不想在本机装 Flutter / Go / Rust？可以直接在 GitHub Actions 里构建，见
 > [HONGAN_BUILD_LINUX.md](HONGAN_BUILD_LINUX.md) 第 3 节。
 
-> 更新检查已指向本仓库的 release，发布 Linux / Windows / macOS 桌面产物（Android 暂未包含）；
-> 仓库还没有 release 时不会提示更新。
+> 更新检查已指向本仓库的 release；`-honganBeta` 发布标记为 prerelease，稳定通道不会自动提示，
+> 需要手动从 release 页下载。
 
 ### 用法
 
