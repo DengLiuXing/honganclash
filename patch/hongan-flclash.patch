@@ -557,7 +557,7 @@ index c72fdb9..5eea74f 100644
                glyph: AppGlyphs.devices,
 diff --git a/lib/views/profiles/hongan.dart b/lib/views/profiles/hongan.dart
 new file mode 100644
-index 0000000..2664706
+index 0000000..9d91913
 --- /dev/null
 +++ b/lib/views/profiles/hongan.dart
 @@ -0,0 +1,137 @@
@@ -572,18 +572,18 @@ index 0000000..2664706
 +Future<HonganSubscription?> showHonganImportDialog({BuildContext? context}) {
 +  return dialogs.showCommonDialog<HonganSubscription>(
 +    context: context,
-+    child: const HonganImportDialog(),
++    child: const _HonganImportDialog(key: ValueKey('hongan-import')),
 +  );
 +}
 +
-+class HonganImportDialog extends StatefulWidget {
-+  const HonganImportDialog({super.key});
++class _HonganImportDialog extends StatefulWidget {
++  const _HonganImportDialog({super.key});
 +
 +  @override
-+  State<HonganImportDialog> createState() => _HonganImportDialogState();
++  State<_HonganImportDialog> createState() => _HonganImportDialogState();
 +}
 +
-+class _HonganImportDialogState extends State<HonganImportDialog> {
++class _HonganImportDialogState extends State<_HonganImportDialog> {
 +  final _emailController = TextEditingController();
 +  final _passwordController = TextEditingController();
 +  final _emailFocusNode = FocusNode();
@@ -664,7 +664,7 @@ index 0000000..2664706
 +        children: [
 +          Text(
 +            '登录红岸面板后自动添加订阅，节点与用量由面板下发。',
-+            style: Theme.of(context).textTheme.labelLarge,
++            style: AppTextStyle.subheadline.of(context),
 +          ),
 +          const SizedBox(height: 16),
 +          TextField(

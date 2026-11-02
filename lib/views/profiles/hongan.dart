@@ -9,18 +9,18 @@ import 'package:material_ui/material_ui.dart';
 Future<HonganSubscription?> showHonganImportDialog({BuildContext? context}) {
   return dialogs.showCommonDialog<HonganSubscription>(
     context: context,
-    child: const HonganImportDialog(),
+    child: const _HonganImportDialog(key: ValueKey('hongan-import')),
   );
 }
 
-class HonganImportDialog extends StatefulWidget {
-  const HonganImportDialog({super.key});
+class _HonganImportDialog extends StatefulWidget {
+  const _HonganImportDialog({super.key});
 
   @override
-  State<HonganImportDialog> createState() => _HonganImportDialogState();
+  State<_HonganImportDialog> createState() => _HonganImportDialogState();
 }
 
-class _HonganImportDialogState extends State<HonganImportDialog> {
+class _HonganImportDialogState extends State<_HonganImportDialog> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _emailFocusNode = FocusNode();
@@ -101,7 +101,7 @@ class _HonganImportDialogState extends State<HonganImportDialog> {
         children: [
           Text(
             '登录红岸面板后自动添加订阅，节点与用量由面板下发。',
-            style: Theme.of(context).textTheme.labelLarge,
+            style: AppTextStyle.subheadline.of(context),
           ),
           const SizedBox(height: 16),
           TextField(
