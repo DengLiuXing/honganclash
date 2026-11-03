@@ -111,7 +111,7 @@ tool/release.sh pre --push
 - tag push 会触发 `build.yaml`，构建并发布：
   - Linux amd64：deb / AppImage / rpm
   - Windows amd64：exe / zip
-  - macOS arm64：dmg（Intel 那台 runner 太慢，已从矩阵移除）
+  - macOS arm64 + amd64：dmg
   - Android arm64：apk（release 签名，见下）
 - 所有产物和 `SHA256SUMS` 会放进同一个 GitHub Release。
 - APK 构建失败不会挡住桌面安装包的发布：`upload` 只要求 `build` 成功。
