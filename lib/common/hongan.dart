@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:fl_clash/common/request.dart';
+import 'package:dio/io.dart';
 
 /// HongAn (红岸) panel endpoints.
 ///
@@ -20,6 +20,18 @@ const honganNodeHost = 'hn.hngggg.top';
 const honganNodeSni = 'down.xlkooiss.com';
 
 const honganInfoPort = 27609;
+
+/// Panel calls go direct. `HttpOverrides.global` sends every other request
+/// through the running Core, and a Core whose profile is dead answers 502 —
+/// which is precisely the situation in which a user has to sign in again.
+final Dio _panelDio = Dio()
+  ..httpClientAdapter = IOHttpClientAdapter(
+    createHttpClient: () {
+      final client = HttpClient();
+      client.findProxy = (_) => 'DIRECT';
+      return client;
+    },
+  );
 
 class HonganApiException implements Exception {
   final String message;
@@ -226,7 +238,7 @@ class HonganApi {
   }) async {
     final Response<Object?> response;
     try {
-      response = await request.dio.request<Object?>(
+      response = await _panelDio.request<Object?>(
         '$honganApiBaseUrl$path',
         data: body == null ? null : json.encode(body),
         options: Options(
@@ -253,7 +265,7 @@ class HonganApi {
       return result;
     }
     throw HonganApiException(
-      _messageOf(result, statusCode),
+      _messageOf(result, statusCode, path),
       statusCode: statusCode,
     );
   }
@@ -427,7 +439,7 @@ Map<String, Object?> _dataOf(Map<String, Object?> body) {
   throw const HonganApiException('面板响应缺少 data');
 }
 
-String _messageOf(Map<String, Object?> body, int? statusCode) {
+String _messageOf(Map<String, Object?> body, int? statusCode, String path) {
   final message = _stringOf(body['message']);
   if (message != null) {
     return message;
@@ -439,7 +451,7 @@ String _messageOf(Map<String, Object?> body, int? statusCode) {
       return '${first.first}';
     }
   }
-  return '面板返回 HTTP $statusCode';
+  return '面板返回 HTTP $statusCode（$path）';
 }
 
 String _networkMessageOf(DioException error) {

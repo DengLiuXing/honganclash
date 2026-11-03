@@ -1,5 +1,9 @@
 part of '../action.dart';
 
+/// Label of the profile a HongAn import creates, and the one a later import
+/// refreshes instead of adding a duplicate.
+const _honganLabel = '红岸云';
+
 @Riverpod(keepAlive: true)
 class ProfilesAction extends _$ProfilesAction {
   CoreController get _core => ref.read(coreHandlerProvider);
@@ -295,7 +299,8 @@ class ProfilesAction extends _$ProfilesAction {
           throw const HonganApiException('面板没有在线节点');
         }
         final saved = await _writeHonganProfile(
-          Profile.normal(label: '红岸云').copyWith(autoUpdate: false),
+          (_existingHonganProfile() ?? Profile.normal(label: _honganLabel))
+              .copyWith(autoUpdate: false),
           uuid: subscription.uuid ?? '',
           subscription: subscription,
           servers: servers,
@@ -311,9 +316,27 @@ class ProfilesAction extends _$ProfilesAction {
       },
       title: currentAppLocalizations.addProfile,
     );
-    if (profile != null) {
-      putProfile(profile);
+    if (profile == null) {
+      return;
     }
+    final existing = ref.read(profilesProvider).getProfile(profile.id);
+    if (existing == null) {
+      putProfile(profile);
+    } else {
+      await _finishProfileUpdate(existing, profile);
+    }
+  }
+
+  /// A profile imported before accounts were stored here has no entry in
+  /// [Preferences.honganAccounts] and cannot sync, so signing in again has to
+  /// find it by the label this code gave it instead of adding a second 红岸云.
+  Profile? _existingHonganProfile() {
+    for (final profile in ref.read(profilesProvider)) {
+      if (profile.type == ProfileType.file && profile.label == _honganLabel) {
+        return profile;
+      }
+    }
+    return null;
   }
 
   int addCustomProfile(String label) {
