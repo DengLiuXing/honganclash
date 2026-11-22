@@ -521,7 +521,15 @@ jobs:
           # The setup hook builds the Core for the host slice only, so an x86_64 slice in the arm64 app cannot run.
           FLUTTER_MACOS_ARM64_ONLY: ${{ matrix.platform == 'macos' && matrix.arch == 'arm64' }}
         # `dart run` first runs every build hook for this runner, Linux GTK and the Go core included; the packager builds them for the target itself.
-        run: dart tool/package.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
+        run: |
+          set +e
+          dart tool/package.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v 2>&1 | tee package.log
+          status=${PIPESTATUS[0]}
+          if ((status)); then
+            grep -nE 'Error|error:|FAILURE|What went wrong|Exception|not found' package.log |
+              tail -25 | sed 's/^/::error::/'
+          fi
+          exit "$status"
 
       # fork: a build that lost the signing config still produces an APK; it just
       # carries the .dev applicationId, so the package name is the check.
