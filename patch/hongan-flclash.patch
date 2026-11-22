@@ -1,20 +1,20 @@
 diff --git a/lib/bootstrap.dart b/lib/bootstrap.dart
-index ed0ca5d..2199028 100644
+index dcecc053..f496f595 100644
 --- a/lib/bootstrap.dart
 +++ b/lib/bootstrap.dart
-@@ -102,6 +102,7 @@ class Bootstrap {
-     await _claimDataDirectory();
-     globalState.packageInfo = await PackageInfo.fromPlatform();
+@@ -91,6 +91,7 @@ class Bootstrap {
+     final storedConfig = await preferences.getConfigMap();
+     _resetMixedPort = unusableMixedPort(storedConfig?['patchClashConfig']);
      var config = await migration.run();
 +    await preferences.loadHonganAccounts();
-     _bootDecision = await bootGuard.evaluate(
-       profileId: config.currentProfileId,
-     );
+     if (_resetMixedPort != null) {
+       await preferences.saveConfig(config);
+     }
 diff --git a/lib/common/common.dart b/lib/common/common.dart
-index 1169f6f..e184861 100644
+index 43eedc79..e7f035df 100644
 --- a/lib/common/common.dart
 +++ b/lib/common/common.dart
-@@ -14,6 +14,7 @@ export 'file.dart';
+@@ -15,6 +15,7 @@ export 'file.dart';
  export 'fixed.dart';
  export 'function.dart';
  export 'future.dart';
@@ -23,31 +23,30 @@ index 1169f6f..e184861 100644
  export 'indexing.dart';
  export 'input_entries.dart';
 diff --git a/lib/common/constant.dart b/lib/common/constant.dart
-index f5b22e0..23e5de1 100644
+index b3c7a037..842d267d 100644
 --- a/lib/common/constant.dart
 +++ b/lib/common/constant.dart
-@@ -120,8 +120,9 @@ const configKey = 'config';
+@@ -134,7 +134,8 @@ const configKey = 'config';
  const systemDnsRecordKey = 'system_dns_record';
  const bootRecordKey = 'boot_record';
  const appliedConfigMd5Key = 'applied_config_md5';
-+const honganAccountsKey = 'hongan_accounts';
- const defaultSystemDnsFallback = '223.5.5.5';
 -const repository = 'chen08209/FlClash';
++const honganAccountsKey = 'hongan_accounts';
 +const repository = 'DengLiuXing/honganclash';
  const maxMobileWidth = 600;
  const maxLaptopWidth = 840;
  const defaultTestUrl = 'https://www.gstatic.com/generate_204';
 diff --git a/lib/common/hongan.dart b/lib/common/hongan.dart
 new file mode 100644
-index 0000000..330d179
+index 00000000..b6ac7862
 --- /dev/null
 +++ b/lib/common/hongan.dart
-@@ -0,0 +1,484 @@
+@@ -0,0 +1,496 @@
 +import 'dart:convert';
 +import 'dart:io';
 +
 +import 'package:dio/dio.dart';
-+import 'package:fl_clash/common/request.dart';
++import 'package:dio/io.dart';
 +
 +/// HongAn (红岸) panel endpoints.
 +///
@@ -65,6 +64,18 @@ index 0000000..330d179
 +const honganNodeSni = 'down.xlkooiss.com';
 +
 +const honganInfoPort = 27609;
++
++/// Panel calls go direct. `HttpOverrides.global` sends every other request
++/// through the running Core, and a Core whose profile is dead answers 502 —
++/// which is precisely the situation in which a user has to sign in again.
++final Dio _panelDio = Dio()
++  ..httpClientAdapter = IOHttpClientAdapter(
++    createHttpClient: () {
++      final client = HttpClient();
++      client.findProxy = (_) => 'DIRECT';
++      return client;
++    },
++  );
 +
 +class HonganApiException implements Exception {
 +  final String message;
@@ -271,7 +282,7 @@ index 0000000..330d179
 +  }) async {
 +    final Response<Object?> response;
 +    try {
-+      response = await request.dio.request<Object?>(
++      response = await _panelDio.request<Object?>(
 +        '$honganApiBaseUrl$path',
 +        data: body == null ? null : json.encode(body),
 +        options: Options(
@@ -298,7 +309,7 @@ index 0000000..330d179
 +      return result;
 +    }
 +    throw HonganApiException(
-+      _messageOf(result, statusCode),
++      _messageOf(result, statusCode, path),
 +      statusCode: statusCode,
 +    );
 +  }
@@ -472,7 +483,7 @@ index 0000000..330d179
 +  throw const HonganApiException('面板响应缺少 data');
 +}
 +
-+String _messageOf(Map<String, Object?> body, int? statusCode) {
++String _messageOf(Map<String, Object?> body, int? statusCode, String path) {
 +  final message = _stringOf(body['message']);
 +  if (message != null) {
 +    return message;
@@ -484,7 +495,7 @@ index 0000000..330d179
 +      return '${first.first}';
 +    }
 +  }
-+  return '面板返回 HTTP $statusCode';
++  return '面板返回 HTTP $statusCode（$path）';
 +}
 +
 +String _networkMessageOf(DioException error) {
@@ -528,7 +539,7 @@ index 0000000..330d179
 +  return null;
 +}
 diff --git a/lib/common/preferences.dart b/lib/common/preferences.dart
-index 383abae..8d89834 100644
+index 3c9d9728..6bca977a 100644
 --- a/lib/common/preferences.dart
 +++ b/lib/common/preferences.dart
 @@ -13,6 +13,10 @@ class Preferences {
@@ -550,7 +561,7 @@ index 383abae..8d89834 100644
      await _store.value;
    }
  
-@@ -188,9 +193,73 @@ class Preferences {
+@@ -180,9 +185,73 @@ class Preferences {
    }
  
    Future<void> clearPreferences() async {
@@ -625,10 +636,20 @@ index 383abae..8d89834 100644
  
  final preferences = Preferences();
 diff --git a/lib/providers/actions/profiles.dart b/lib/providers/actions/profiles.dart
-index 78cdfdf..eebb13d 100644
+index 8972da47..2b28a98a 100644
 --- a/lib/providers/actions/profiles.dart
 +++ b/lib/providers/actions/profiles.dart
-@@ -21,6 +21,7 @@ class ProfilesAction extends _$ProfilesAction {
+@@ -1,5 +1,9 @@
+ part of '../action.dart';
+ 
++/// Label of the profile a HongAn import creates, and the one a later import
++/// refreshes instead of adding a duplicate.
++const _honganLabel = '红岸云';
++
+ @Riverpod(keepAlive: true)
+ class ProfilesAction extends _$ProfilesAction {
+   CoreController get _core => ref.read(coreHandlerProvider);
+@@ -39,6 +43,7 @@ class ProfilesAction extends _$ProfilesAction {
  
    Future<void> deleteProfile(int id) async {
      await ref.read(profilesProvider.notifier).del(id);
@@ -636,7 +657,7 @@ index 78cdfdf..eebb13d 100644
      await clearEffect(id);
      final currentProfileId = ref.read(currentProfileIdProvider);
      if (currentProfileId == id) {
-@@ -147,35 +148,81 @@ class ProfilesAction extends _$ProfilesAction {
+@@ -165,35 +170,81 @@ class ProfilesAction extends _$ProfilesAction {
        final updated = await profile.update(
          validate: (path, key) => _core.validateProfile(path, key),
        );
@@ -744,7 +765,7 @@ index 78cdfdf..eebb13d 100644
      } finally {
        if (operation != null) {
          ref
-@@ -185,6 +232,33 @@ class ProfilesAction extends _$ProfilesAction {
+@@ -203,6 +254,33 @@ class ProfilesAction extends _$ProfilesAction {
      }
    }
  
@@ -778,7 +799,7 @@ index 78cdfdf..eebb13d 100644
    Future<void> addProfileFormFile() async {
      final platformFile = await globalState.safeRun(picker.pickerFile);
      if (platformFile == null) return;
-@@ -207,6 +281,41 @@ class ProfilesAction extends _$ProfilesAction {
+@@ -225,6 +303,60 @@ class ProfilesAction extends _$ProfilesAction {
      }
    }
  
@@ -796,7 +817,8 @@ index 78cdfdf..eebb13d 100644
 +          throw const HonganApiException('面板没有在线节点');
 +        }
 +        final saved = await _writeHonganProfile(
-+          Profile.normal(label: '红岸云').copyWith(autoUpdate: false),
++          (_existingHonganProfile() ?? Profile.normal(label: _honganLabel))
++              .copyWith(autoUpdate: false),
 +          uuid: subscription.uuid ?? '',
 +          subscription: subscription,
 +          servers: servers,
@@ -812,26 +834,44 @@ index 78cdfdf..eebb13d 100644
 +      },
 +      title: currentAppLocalizations.addProfile,
 +    );
-+    if (profile != null) {
-+      putProfile(profile);
++    if (profile == null) {
++      return;
 +    }
++    final existing = ref.read(profilesProvider).getProfile(profile.id);
++    if (existing == null) {
++      putProfile(profile);
++    } else {
++      await _finishProfileUpdate(existing, profile);
++    }
++  }
++
++  /// A profile imported before accounts were stored here has no entry in
++  /// [Preferences.honganAccounts] and cannot sync, so signing in again has to
++  /// find it by the label this code gave it instead of adding a second 红岸云.
++  Profile? _existingHonganProfile() {
++    for (final profile in ref.read(profilesProvider)) {
++      if (profile.type == ProfileType.file && profile.label == _honganLabel) {
++        return profile;
++      }
++    }
++    return null;
 +  }
 +
    int addCustomProfile(String label) {
      final profile = Profile.custom(label: label);
      putProfile(profile);
 diff --git a/lib/views/profiles/add.dart b/lib/views/profiles/add.dart
-index c72fdb9..9dd657f 100644
+index dc0d7a82..4b7872a2 100644
 --- a/lib/views/profiles/add.dart
 +++ b/lib/views/profiles/add.dart
-@@ -6,6 +6,7 @@ import 'package:fl_clash/plugins/app.dart';
+@@ -7,6 +7,7 @@ import 'package:fl_clash/plugins/app.dart';
  import 'package:fl_clash/providers/providers.dart';
  import 'package:fl_clash/ui/icons/icons.dart';
  import 'package:fl_clash/views/profiles/custom/custom.dart';
 +import 'package:fl_clash/views/profiles/hongan.dart';
- import 'package:fl_clash/features/form/form.dart';
  import 'package:fl_clash/widgets/widgets.dart';
- import 'package:material_ui/material_ui.dart';
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_riverpod/flutter_riverpod.dart';
 @@ -112,6 +113,16 @@ class AddProfileMenu extends ConsumerWidget {
      }
    }
@@ -853,18 +893,18 @@ index c72fdb9..9dd657f 100644
              label: appLocalizations.link,
              onPressed: () => _toAdd(context, ref),
            ),
-+          CommonPopupMenuItem(
++          PopupMenuItem(
 +            glyph: AppGlyphs.account,
 +            label: '红岸账号导入',
 +            subtitle: '登录红岸面板并自动生成配置',
 +            onPressed: () => _toHongan(context, ref),
 +          ),
            if (system.isTV)
-             CommonPopupMenuItem(
+             PopupMenuItem(
                glyph: AppGlyphs.devices,
 diff --git a/lib/views/profiles/hongan.dart b/lib/views/profiles/hongan.dart
 new file mode 100644
-index 0000000..8550eac
+index 00000000..8550eac4
 --- /dev/null
 +++ b/lib/views/profiles/hongan.dart
 @@ -0,0 +1,138 @@
@@ -1007,10 +1047,10 @@ index 0000000..8550eac
 +  }
 +}
 diff --git a/lib/views/profiles/profiles.dart b/lib/views/profiles/profiles.dart
-index 7d4c0ca..ecd6a41 100644
+index e908820f..acd4126e 100644
 --- a/lib/views/profiles/profiles.dart
 +++ b/lib/views/profiles/profiles.dart
-@@ -27,6 +27,10 @@ double get _profileItemHeight {
+@@ -28,6 +28,10 @@ double get _profileItemHeight {
        2 * listRowVerticalPadding;
  }
  
@@ -1021,7 +1061,7 @@ index 7d4c0ca..ecd6a41 100644
  class ProfilesView extends ConsumerStatefulWidget {
    const ProfilesView({super.key, this.picker = false});
  
-@@ -49,9 +53,14 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
+@@ -50,9 +54,14 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
      final profilesAction = ref.read(profilesActionProvider.notifier);
      final List<UpdatingMessage> messages = [];
      final updateProfiles = profiles.map<Future>((profile) async {
@@ -1038,7 +1078,7 @@ index 7d4c0ca..ecd6a41 100644
        } catch (e) {
          messages.add(
            UpdatingMessage(
-@@ -307,11 +316,15 @@ class ProfileItem extends ConsumerWidget {
+@@ -342,11 +351,15 @@ class ProfileItem extends ConsumerWidget {
    }
  
    Future updateProfile(WidgetRef ref) async {
@@ -1058,7 +1098,7 @@ index 7d4c0ca..ecd6a41 100644
      }, tag: LoadingTag.profiles);
    }
  
-@@ -322,8 +335,7 @@ class ProfileItem extends ConsumerWidget {
+@@ -357,8 +370,7 @@ class ProfileItem extends ConsumerWidget {
      );
    }
  
@@ -1068,18 +1108,18 @@ index 7d4c0ca..ecd6a41 100644
  
    String _subtitle(BuildContext context) {
      final info = _subscriptionInfo;
-@@ -435,7 +447,7 @@ class ProfileItem extends ConsumerWidget {
+@@ -470,7 +482,7 @@ class ProfileItem extends ConsumerWidget {
              _handlePushGenProfilePage(context, profile.id);
            },
          ),
 -      if (isUrl)
 +      if (isUrl || _isHonganProfile(profile))
-         CommonPopupMenuItem(
+         PopupMenuItem(
            glyph: AppGlyphs.sync,
            label: appLocalizations.sync,
 diff --git a/test/common/hongan_test.dart b/test/common/hongan_test.dart
 new file mode 100644
-index 0000000..bc8061e
+index 00000000..bc8061ea
 --- /dev/null
 +++ b/test/common/hongan_test.dart
 @@ -0,0 +1,110 @@
@@ -1194,10 +1234,10 @@ index 0000000..bc8061e
 +  });
 +}
 diff --git a/test/widgets/profile_focus_test.dart b/test/widgets/profile_focus_test.dart
-index 7946458..6fd41ea 100644
+index 5b0ef1dd..e2aa5c0d 100644
 --- a/test/widgets/profile_focus_test.dart
 +++ b/test/widgets/profile_focus_test.dart
-@@ -171,6 +171,22 @@ void main() {
+@@ -166,6 +166,22 @@ void main() {
      );
    });
  
