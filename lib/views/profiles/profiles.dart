@@ -52,7 +52,7 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
     final updateProfiles = profiles.map<Future>((profile) async {
       // A HongAn profile refreshes from the panel, not from a subscription URL.
       if (profile.type != ProfileType.url &&
-          !preferences.hasHonganAccount(profile.id)) {
+          !honganAccounts.contains(profile.id)) {
         return;
       }
       try {
@@ -347,7 +347,7 @@ class ProfileItem extends ConsumerWidget {
 
   Future updateProfile(WidgetRef ref) async {
     if (profile.type != ProfileType.url &&
-        !preferences.hasHonganAccount(profile.id)) {
+        !honganAccounts.contains(profile.id)) {
       return;
     }
     await globalState.loadingRun(() async {
@@ -365,7 +365,7 @@ class ProfileItem extends ConsumerWidget {
   }
 
   SubscriptionInfo? get _subscriptionInfo =>
-      profile.type == ProfileType.url || preferences.hasHonganAccount(profile.id)
+      profile.type == ProfileType.url || honganAccounts.contains(profile.id)
       ? profile.subscriptionInfo
       : null;
 
@@ -479,7 +479,7 @@ class ProfileItem extends ConsumerWidget {
             _handlePushGenProfilePage(context, profile.id);
           },
         ),
-      if (isUrl || preferences.hasHonganAccount(profile.id))
+      if (isUrl || honganAccounts.contains(profile.id))
         PopupMenuItem(
           glyph: AppGlyphs.sync,
           label: appLocalizations.sync,

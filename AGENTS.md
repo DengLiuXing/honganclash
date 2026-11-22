@@ -25,6 +25,8 @@ Read these only when the task touches their area:
   `.agents/skills/`, and worktree hygiene.
 - [.agents/flutter-upgrade.md](.agents/flutter-upgrade.md): SDK-pinned workarounds to recheck before changing the
   Flutter version.
+- [.agents/hongan.md](.agents/hongan.md): where the 红岸 (HongAn) panel support lives, which upstream files it may
+  touch, and what must stay upstream-identical.
 
 ## Highest Priority Rules
 
@@ -38,6 +40,8 @@ Read these only when the task touches their area:
   [rules.md](.agents/rules.md).
 - Start FlClash on the host only as a safe mode build, and end only processes you started, by recorded pid; never kill
   by name. See Running the App Locally in [rules.md](.agents/rules.md).
+- Keep the 红岸 patch thin: panel, persistence and profile writing live in `lib/common/hongan.dart`, and the only
+  upstream files it may touch are the routing lines in [.agents/hongan.md](.agents/hongan.md).
 - Use `flutter test`, not `dart test`. Run code generation after changing models, providers, or the database schema,
   and never edit generated files.
 - Desktop Core process convergence belongs to `lib/core/desktop/` and Android service intent arbitration to

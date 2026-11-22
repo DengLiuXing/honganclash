@@ -1,9 +1,5 @@
 part of '../action.dart';
 
-/// Label of the profile a HongAn import creates, and the one a later import
-/// refreshes instead of adding a duplicate.
-const _honganLabel = '红岸云';
-
 @Riverpod(keepAlive: true)
 class ProfilesAction extends _$ProfilesAction {
   CoreController get _core => ref.read(coreHandlerProvider);
@@ -43,7 +39,7 @@ class ProfilesAction extends _$ProfilesAction {
 
   Future<void> deleteProfile(int id) async {
     await ref.read(profilesProvider.notifier).del(id);
-    await preferences.removeHonganAccount(id);
+    await honganAccounts.remove(id);
     await clearEffect(id);
     final currentProfileId = ref.read(currentProfileIdProvider);
     if (currentProfileId == id) {
@@ -162,7 +158,7 @@ class ProfilesAction extends _$ProfilesAction {
     Profile profile, {
     bool showLoading = false,
   }) async {
-    if (preferences.hasHonganAccount(profile.id)) {
+    if (honganAccounts.contains(profile.id)) {
       return _syncHonganProfile(profile, showLoading: showLoading);
     }
     final operation = showLoading
@@ -215,37 +211,20 @@ class ProfilesAction extends _$ProfilesAction {
     }
   }
 
-  /// Rebuilds [profile] from the panel with the credentials it kept, instead
-  /// of downloading its subscription URL.
+  /// Rebuilds [profile] from the panel instead of downloading its subscription
+  /// URL; [refreshHonganProfile] does the panel work.
   Future<void> _syncHonganProfile(
     Profile profile, {
     bool showLoading = false,
   }) async {
-    final account = preferences.honganAccounts[profile.id];
-    if (account == null) {
-      throw const HonganApiException('未找到红岸账号信息，请重新导入');
-    }
     final operation = showLoading
         ? ref.read(updatingKeysProvider.notifier).start(profile.updatingKey)
         : null;
     try {
       ref.read(profilesProvider.notifier).put(profile);
-      final subscription = await honganApi.subscription(
-        HonganSession(
-          email: account.email,
-          subscriptionToken: account.subscriptionToken,
-          jwt: account.jwt,
-        ),
-      );
-      final servers = await honganApi.servers(jwt: account.jwt);
-      if (servers.isEmpty) {
-        throw const HonganApiException('面板没有在线节点');
-      }
-      final saved = await _writeHonganProfile(
+      final saved = await refreshHonganProfile(
         profile,
-        uuid: subscription.uuid ?? account.uuid,
-        subscription: subscription,
-        servers: servers,
+        validate: (path, key) => _core.validateProfile(path, key),
       );
       await _finishProfileUpdate(profile, saved);
     } finally {
@@ -255,33 +234,6 @@ class ProfilesAction extends _$ProfilesAction {
             .stop(profile.updatingKey, operation);
       }
     }
-  }
-
-  Future<Profile> _writeHonganProfile(
-    Profile profile, {
-    required String uuid,
-    required HonganSubscription subscription,
-    required List<HonganServer> servers,
-  }) {
-    if (uuid.isEmpty) {
-      throw const HonganApiException('面板未返回账号 uuid');
-    }
-    final expire = subscription.expiredAt?.millisecondsSinceEpoch ?? 0;
-    return profile
-        .copyWith(
-          subscriptionInfo: SubscriptionInfo(
-            upload: subscription.upload,
-            download: subscription.download,
-            total: subscription.transferEnable,
-            expire: expire ~/ 1000,
-          ),
-        )
-        .saveFile(
-          Uint8List.fromList(
-            utf8.encode(buildHonganConfig(servers: servers, uuid: uuid)),
-          ),
-          validate: (path, key) => _core.validateProfile(path, key),
-        );
   }
 
   Future<void> addProfileFormFile() async {
@@ -308,33 +260,14 @@ class ProfilesAction extends _$ProfilesAction {
 
   Future<void> addHonganProfile(HonganImport import) async {
     _showProfiles();
-    final (:session, :subscription) = import;
+    final profiles = ref.read(profilesProvider);
     final profile = await globalState.loadingRun(
       tag: LoadingTag.profiles,
-      () async {
-        if (session.jwt.isEmpty) {
-          throw const HonganApiException('登录状态已失效，请重新登录');
-        }
-        final servers = await honganApi.servers(jwt: session.jwt);
-        if (servers.isEmpty) {
-          throw const HonganApiException('面板没有在线节点');
-        }
-        final saved = await _writeHonganProfile(
-          (_existingHonganProfile() ?? Profile.normal(label: _honganLabel))
-              .copyWith(autoUpdate: false),
-          uuid: subscription.uuid ?? '',
-          subscription: subscription,
-          servers: servers,
-        );
-        final account = HonganAccount(
-          email: session.email,
-          jwt: session.jwt,
-          subscriptionToken: session.subscriptionToken,
-          uuid: subscription.uuid ?? '',
-        );
-        await preferences.saveHonganAccount(saved.id, account);
-        return saved;
-      },
+      () => createHonganProfile(
+        import,
+        existing: honganAccounts.existingProfile(profiles),
+        validate: (path, key) => _core.validateProfile(path, key),
+      ),
       title: currentAppLocalizations.addProfile,
     );
     if (profile == null) {
@@ -346,18 +279,6 @@ class ProfilesAction extends _$ProfilesAction {
     } else {
       await _finishProfileUpdate(existing, profile);
     }
-  }
-
-  /// A profile imported before accounts were stored here has no entry in
-  /// [Preferences.honganAccounts] and cannot sync, so signing in again has to
-  /// find it by the label this code gave it instead of adding a second 红岸云.
-  Profile? _existingHonganProfile() {
-    for (final profile in ref.read(profilesProvider)) {
-      if (profile.type == ProfileType.file && profile.label == _honganLabel) {
-        return profile;
-      }
-    }
-    return null;
   }
 
   int addCustomProfile(String label) {

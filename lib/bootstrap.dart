@@ -91,7 +91,7 @@ class Bootstrap {
     final storedConfig = await preferences.getConfigMap();
     _resetMixedPort = unusableMixedPort(storedConfig?['patchClashConfig']);
     var config = await migration.run();
-    await preferences.loadHonganAccounts();
+    await honganAccounts.load();
     if (_resetMixedPort != null) {
       await preferences.saveConfig(config);
     }

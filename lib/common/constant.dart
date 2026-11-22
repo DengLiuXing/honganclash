@@ -134,7 +134,6 @@ const configKey = 'config';
 const systemDnsRecordKey = 'system_dns_record';
 const bootRecordKey = 'boot_record';
 const appliedConfigMd5Key = 'applied_config_md5';
-const honganAccountsKey = 'hongan_accounts';
 const repository = 'DengLiuXing/honganclash';
 const maxMobileWidth = 600;
 const maxLaptopWidth = 840;

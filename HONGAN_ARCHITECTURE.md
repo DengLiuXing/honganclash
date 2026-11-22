@@ -152,7 +152,7 @@ GET <subscribe_url>
 - 内核本身就是 mihomo 的 fork —— 上游 FlClash 用的是同一族的 `chen08209/Clash.Meta`（分支 `FlClash`），
   所以「不换内核、只补登录逻辑」就能在 Linux/macOS 上得到等价体验。
 
-本仓库的补丁正是这么做的：见 [`README.md`](README.md) 与 `patch/hongan-flashclash.patch`。
+本仓库的补丁正是这么做的：见 [`README.md`](README.md) 与 [`.agents/hongan.md`](.agents/hongan.md)。
 
 ---
 

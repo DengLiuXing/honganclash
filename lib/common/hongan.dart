@@ -3,6 +3,10 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
+import 'package:fl_clash/enum/enum.dart';
+import 'package:fl_clash/models/models.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// HongAn (红岸) panel endpoints.
 ///
@@ -493,4 +497,187 @@ DateTime? _dateOf(Object? value) {
     return DateTime.tryParse(value);
   }
   return null;
+}
+
+/// Label of the profile an import creates, and the one a later import refreshes
+/// instead of adding a duplicate.
+const honganProfileLabel = '红岸云';
+
+const honganAccountsKey = 'hongan_accounts';
+
+/// The panel credentials of every imported profile, keyed by profile id, so a
+/// refresh can ask the panel instead of the profile's subscription URL.
+class HonganAccounts {
+  Map<int, HonganAccount> _accounts = const {};
+
+  Map<int, HonganAccount> get accounts => _accounts;
+
+  HonganAccount? operator [](int profileId) => _accounts[profileId];
+
+  bool contains(int profileId) => _accounts.containsKey(profileId);
+
+  Future<void> load() async {
+    final store = await SharedPreferences.getInstance();
+    _accounts = _decode(store.getString(honganAccountsKey));
+  }
+
+  Future<void> save(int profileId, HonganAccount account) async {
+    _accounts = {..._accounts, profileId: account};
+    await _persist();
+  }
+
+  Future<void> remove(int profileId) async {
+    if (!contains(profileId)) {
+      return;
+    }
+    final accounts = {..._accounts}..remove(profileId);
+    _accounts = accounts;
+    await _persist();
+  }
+
+  /// A profile imported before credentials were stored here cannot sync, so
+  /// signing in again finds it by the label this code gave it.
+  Profile? existingProfile(Iterable<Profile> profiles) {
+    for (final profile in profiles) {
+      if (profile.type == ProfileType.file &&
+          profile.label == honganProfileLabel) {
+        return profile;
+      }
+    }
+    return null;
+  }
+
+  @visibleForTesting
+  void debugSet(Map<int, HonganAccount> accounts) {
+    _accounts = accounts;
+  }
+
+  Future<void> _persist() async {
+    final accounts = {
+      for (final entry in _accounts.entries)
+        '${entry.key}': entry.value.toJson(),
+    };
+    final store = await SharedPreferences.getInstance();
+    await store.setString(honganAccountsKey, json.encode(accounts));
+  }
+
+  Map<int, HonganAccount> _decode(String? raw) {
+    if (raw == null) {
+      return const {};
+    }
+    try {
+      final decoded = json.decode(raw);
+      if (decoded is! Map) {
+        return const {};
+      }
+      final accounts = <int, HonganAccount>{};
+      for (final MapEntry(:key, :value) in decoded.entries) {
+        final profileId = int.tryParse('$key');
+        final account = HonganAccount.fromJson(value);
+        if (profileId != null && account != null) {
+          accounts[profileId] = account;
+        }
+      }
+      return accounts;
+    } catch (_) {
+      return const {};
+    }
+  }
+}
+
+final honganAccounts = HonganAccounts();
+
+/// Writes [servers] into [profile] as its config, with the panel's traffic
+/// stamped on it so the card shows usage without a subscription URL.
+Future<Profile> saveHonganProfile(
+  Profile profile, {
+  required String uuid,
+  required HonganSubscription subscription,
+  required List<HonganServer> servers,
+  required ValidateConfig validate,
+}) {
+  if (uuid.isEmpty) {
+    throw const HonganApiException('面板未返回账号 uuid');
+  }
+  final expire = subscription.expiredAt?.millisecondsSinceEpoch ?? 0;
+  return profile
+      .copyWith(
+        subscriptionInfo: SubscriptionInfo(
+          upload: subscription.upload,
+          download: subscription.download,
+          total: subscription.transferEnable,
+          expire: expire ~/ 1000,
+        ),
+      )
+      .saveFile(
+        Uint8List.fromList(
+          utf8.encode(buildHonganConfig(servers: servers, uuid: uuid)),
+        ),
+        validate: validate,
+      );
+}
+
+/// Writes the profile [import] describes, refreshing [existing] instead of
+/// adding a second one, and remembers the credentials a refresh needs.
+Future<Profile> createHonganProfile(
+  HonganImport import, {
+  Profile? existing,
+  required ValidateConfig validate,
+}) async {
+  final (:session, :subscription) = import;
+  if (session.jwt.isEmpty) {
+    throw const HonganApiException('登录状态已失效，请重新登录');
+  }
+  final servers = await honganApi.servers(jwt: session.jwt);
+  if (servers.isEmpty) {
+    throw const HonganApiException('面板没有在线节点');
+  }
+  final saved = await saveHonganProfile(
+    (existing ?? Profile.normal(label: honganProfileLabel)).copyWith(
+      autoUpdate: false,
+    ),
+    uuid: subscription.uuid ?? '',
+    subscription: subscription,
+    servers: servers,
+    validate: validate,
+  );
+  await honganAccounts.save(
+    saved.id,
+    HonganAccount(
+      email: session.email,
+      jwt: session.jwt,
+      subscriptionToken: session.subscriptionToken,
+      uuid: subscription.uuid ?? '',
+    ),
+  );
+  return saved;
+}
+
+/// Rebuilds [profile] from the panel with the credentials it kept.
+Future<Profile> refreshHonganProfile(
+  Profile profile, {
+  required ValidateConfig validate,
+}) async {
+  final account = honganAccounts[profile.id];
+  if (account == null) {
+    throw const HonganApiException('未找到红岸账号信息，请重新导入');
+  }
+  final subscription = await honganApi.subscription(
+    HonganSession(
+      email: account.email,
+      subscriptionToken: account.subscriptionToken,
+      jwt: account.jwt,
+    ),
+  );
+  final servers = await honganApi.servers(jwt: account.jwt);
+  if (servers.isEmpty) {
+    throw const HonganApiException('面板没有在线节点');
+  }
+  return saveHonganProfile(
+    profile,
+    uuid: subscription.uuid ?? account.uuid,
+    subscription: subscription,
+    servers: servers,
+    validate: validate,
+  );
 }

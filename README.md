@@ -5,13 +5,13 @@
 
 本仓库是 **FlClash 源码 + 红岸支持补丁**：可以直接 `flutter run -d linux` 起界面，然后像上游一样用订阅、节点、规则、TUN、系统代理。
 
-- 上游：<https://github.com/chen08209/FlClash>（`main` 分支，v0.9.2 快照 `7fd417f`，2026-11-02）
-- 本仓库相对上游的全部代码改动：**11 个文件，+1029 行，-36 行**（含测试；另加若干说明与工具文件，见下表）
+- 上游：<https://github.com/chen08209/FlClash>（`main` 分支，v0.9.4 快照 `afe7136`，2026-11-20）
+- 本仓库相对上游的全部代码改动：**10 个文件，+1074 行，-32 行**（含测试；其中 793 行是两个新增文件）
 - 许可：**GPL-3.0**（继承上游，`LICENSE` 原文未改）
 
 ## 版本规则
 
-- 上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta.0.0.N`（例如上游 `0.9.2` → `0.9.2-honganBeta.0.0.2`）。
+- 上游 `X.Y.Z` → 本仓库 `X.Y.Z-honganBeta.0.0.N`（例如上游 `0.9.4` → `0.9.4-honganBeta.0.0.2`）。
   N 从 `2` 起，每次预发布只把末位加一（`.0.0.3`、`.0.0.4`…）。
 - `.upstream-version` 记录当前上游版本；`pubspec.yaml` 的 build number 保持 `YYYYMMDDNN`，
   beta 计数只出现在 tag 上，不写进 pubspec。
@@ -29,19 +29,18 @@
 
 | 文件 | 类型 | 说明 |
 | --- | --- | --- |
-| `lib/common/hongan.dart` | **新增** | 面板 API：`login()` / `subscription()` / `servers()`；`buildHonganConfig()` 把明文节点表生成本地 mihomo 配置；`HonganAccount` 是同步要复用的凭据 |
+| `lib/common/hongan.dart` | **新增** | 面板 API（`login()` / `subscription()` / `servers()`）、`buildHonganConfig()`、账号模型与持久化 `honganAccounts`、`createHonganProfile()` / `refreshHonganProfile()` |
 | `lib/views/profiles/hongan.dart` | **新增** | 「红岸账号导入」弹窗：邮箱/密码、加载态、错误提示 |
-| `lib/views/profiles/add.dart` | 修改 | 订阅页新增入口项；登录后交给 `addHonganProfile()` |
-| `lib/providers/actions/profiles.dart` | 修改 | 生成 file profile 并写入 `SubscriptionInfo`（用量/到期）；`syncHonganProfile()` 用同一套面板逻辑重建配置 |
-| `lib/views/profiles/profiles.dart` | 修改 | file profile 也显示流量用量；红岸配置的「同步」走红岸接口而不是订阅地址 |
-| `lib/common/preferences.dart` | 修改 | 红岸凭据（JWT / 订阅 token / uuid）落盘并缓存，供同步复用 |
-| `lib/common/constant.dart` | 修改 | 存储键 `hongan_accounts`；fork 仓库地址 |
+| `lib/providers/actions/profiles.dart` | 修改 | 刷新路由与三个动作（`addHonganProfile` / `_syncHonganProfile` / `_finishProfileUpdate`），面板与写入逻辑都在上面那个新文件里 |
+| `lib/views/profiles/add.dart` | 修改 | 订阅页新增入口项 |
+| `lib/views/profiles/profiles.dart` | 修改 | 三处判断：放行红岸 profile 刷新、显示用量、显示刷新菜单项 |
+| `lib/common/constant.dart` | 修改 | `repository` 指向本仓库 |
 | `lib/common/common.dart` | 修改 | `export 'hongan.dart';` |
-| `lib/bootstrap.dart` | 修改 | 启动时载入红岸凭据缓存 |
+| `lib/bootstrap.dart` | 修改 | 启动时 `honganAccounts.load()` |
 | `test/common/hongan_test.dart` | **新增** | 节点解析 / 配置生成 / 凭据序列化测试 |
-| `test/widgets/profile_focus_test.dart` | 修改 | file profile 流量显示测试 |
+| `test/widgets/profile_focus_test.dart` | 修改 | 红岸 profile 的流量显示测试 |
 
-`patch/hongan-flclash.patch` 是本 fork 自身改动的 `git diff` 存档，只用于本 fork 内部核对与重放。
+`lib/common/preferences.dart` 与上游逐字一致：账号表由 `honganAccounts` 自己读写 `SharedPreferences`。
 红岸联动是 fork 专属能力，不向上游 `chen08209/FlClash` 提交，也不作为向新上游移植的素材。
 
 ### 1.2 说明 / 工具文件（不参与编译）
@@ -52,7 +51,6 @@
 | `README_UPSTREAM.md` | 改名 | 上游 FlClash 的原始 README（内容一字未改，仅改名，避免与本文件冲突） |
 | `HONGAN_ARCHITECTURE.md` | **新增** | 逆向分析：红岸 Windows 客户端到底是怎么拿到 Clash 配置的（组件、链路、内核 RPC、加密与内存取证、复现方法） |
 | `HONGAN_BUILD_LINUX.md` | **新增** | Linux 构建 / 子模块坑 / 使用 / 排错 |
-| `patch/hongan-flclash.patch` | **新增** | 上表 1.1 的 `git diff`（39301 B，1222 行，LF，11 个文件） |
 | `tools/hongan_fetch.py` | **新增** | 纯 Python 标准库脚本：`/user/server/fetch` 明文节点表 / 免密读客户端凭据 / **uuid+模板** 兜底，`--discover`/`--verify` 用 mihomo 实测 |
 | `.gitignore` | 修改 | 追加一栏：**不要把抓下来的节点/订阅文件提交上来**（里面有你的账号凭据） |
 | `.gitmodules` | 修改 | 子模块 `core/Clash.Meta` 的 URL 由 SSH 改成 HTTPS（否则没配 GitHub key 的 Linux 机器拉不动） |
@@ -158,7 +156,7 @@ file profile 不会自动更新；重新登录一次即可刷新节点与用量�
 
 ## 5. 已知限制
 
-1. **上游快照是 v0.9.2（`7fd417f`）**：本仓库的代码改动已 rebase/重放到该快照上；
+1. **上游快照是 v0.9.4（`afe7136`）**：本仓库的代码改动已重放到该快照上；
    `flutter pub get`、`flutter analyze --no-fatal-infos` 和红岸相关 `flutter test` 已通过。
 2. **订阅接口不是 YAML 源**：它只认官方 UA 且返回加密数据；节点明文来自 `/user/server/fetch`。
    如果这个接口也不可达，导入会报错；兜底是导入一份已有的完整 YAML，或使用 `tools/hongan_fetch.py`
