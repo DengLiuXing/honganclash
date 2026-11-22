@@ -303,11 +303,12 @@ git tag v0.8.96
 git push origin main && git push origin v0.8.96
 ```
 
-The tag decides the version, not a commit. A release tag is `vX.Y.Z`, `vX.Y.Z-pre.N`, or `vX.Y.Z-pre.N+M`, where `+M`
-rebuilds prerelease N after a fix; the `version` job rejects any other `v*` tag. It writes `X.Y.Z` from the tag into
-`pubspec.yaml` for the build and upload jobs, with a build number of the tag run's UTC `YYYYMMDDHH`, raised above the
-committed one when that is not already larger, because Android refuses an update with a lower versionCode. The app's
-version name stays `X.Y.Z` for a prerelease too: `compareVersions` reads only numbers. The build number in
+The tag decides the version, not a commit. A release tag here is `vX.Y.Z-honganBeta`, `vX.Y.Z-honganBeta.0.0.N` or
+`vX.Y.Z-honganBeta.0.0.N+M`, where `+M` rebuilds prerelease N after a fix; the `version` job rejects any other `v*` tag,
+and `tool/check_fork_version.sh` additionally requires `X.Y.Z` to equal `.upstream-version`. It writes `X.Y.Z` from the
+tag into `pubspec.yaml` for the build and upload jobs, with a build number of the tag run's UTC `YYYYMMDDHH`, raised
+above the committed one when that is not already larger, because Android refuses an update with a lower versionCode. The
+app's version name stays `X.Y.Z` for a prerelease too: `compareVersions` reads only numbers. The build number in
 `pubspec.yaml` stays fixed; a local build that must install over a CI one passes its own
 `--build-number`.
 
@@ -467,10 +468,12 @@ and the gomobile AAR built for one ABI), `rust` (both crates), and a
 Windows runner for the helper's `windows-service` feature. On branch pushes a
 `desktop` job also compiles a debug build per desktop platform; a tag skips it,
 since its release matrix compiles the same native code. Release builds run only
-in the public repository and start alongside the checks: the `build` matrix plus
-an `android-apk` job that signs one arm64 APK from the four `ANDROID_*` secrets.
-`upload` waits for `build` alone, so a failed APK leaves the desktop installers
-publishing; it runs only once `build` succeeds.
+in the public repository and start alongside the checks; `upload` publishes
+only once every build and every check job passes.
+
+Two fork patches sit in that path: the `build` matrix keeps an Android entry
+built from one ABI and signed with this repository's `ANDROID_*` secrets, and a
+`-honganBeta` tag releases as a GitHub prerelease.
 
 `bash tool/check_plugins.sh` is that plugin gate, and CI runs the same script.
 It discovers every `plugins/*/pubspec.yaml`, analyzes each package, and runs

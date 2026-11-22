@@ -14,7 +14,10 @@ concurrency:
 
 env:
   IS_STABLE: ${{ !contains(github.ref, '-') }}
+  # fork: -honganBeta tags publish as GitHub prereleases, not as stable releases.
   IS_BETA: ${{ contains(github.ref, '-honganBeta') }}
+  # See CI Caches in .agents/commands.md.
+  BRANCH_CACHE: ${{ !startsWith(github.ref, 'refs/tags/') }}
   FLUTTER_VERSION: '3.50.0'
   GO_VERSION: '1.27.1'
   NDK_VERSION: r28c
@@ -26,7 +29,6 @@ jobs:
     # started by hand.
     if: &checks github.event_name == 'workflow_dispatch' || !github.event.repository.private
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,13 +44,14 @@ jobs:
         with:
           workspaces: plugins/rust_api/rust
           cache-directories: .dart_tool/hooks_runner
+          save-if: ${{ env.BRANCH_CACHE }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+          cache: ${{ env.BRANCH_CACHE }}
 
       - name: Install Linux build dependencies
         run: |
@@ -71,16 +74,13 @@ jobs:
         run: |
           yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
 
-      # This fork imports upstream as a snapshot; upstream tags such as v0.8.96
-      # are absent, so the changelog range cannot be resolved here.
+      # fork: upstream comes in as a snapshot, so this tree has none of the
+      # upstream tags the changelog range needs; the check reports and moves on.
       - name: Verify changelog
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         continue-on-error: true
         run: dart run tool/changelog.dart verify
 
-      # tool/test.dart bundles the files into 32 entrypoints and re-runs any file
-      # that only failed next to others on its own, so a shared-isolate clash
-      # does not fail the run; plain `flutter test` starts one program per file.
       - name: Run tests
         run: dart run tool/test.dart -- --reporter expanded --coverage
 
@@ -102,7 +102,7 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+          cache: ${{ env.BRANCH_CACHE }}
 
       - name: Validate local Flutter packages
         run: bash tool/check_plugins.sh
@@ -116,7 +116,7 @@ jobs:
 
   desktop:
     name: Desktop ${{ matrix.platform }}
-    if: *checks
+    if: (github.event_name == 'workflow_dispatch' || !github.event.repository.private) && !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -138,7 +138,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: core/go.sum
+          cache-dependency-path: |
+            core/go.sum
+            plugins/setup/setup_hooks/lib/src/go_builder.dart
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -194,6 +196,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: ${{ env.BRANCH_CACHE }}
           cache-dependency-path: core/go.sum
 
       - name: Validate Go core wrapper
@@ -236,14 +239,17 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: core/go.sum
+          cache: ${{ env.BRANCH_CACHE }}
+          cache-dependency-path: |
+            core/go.sum
+            android/core/build.gradle.kts
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+          cache: ${{ env.BRANCH_CACHE }}
 
       - name: Install dependencies
         run: flutter pub get
@@ -263,6 +269,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
       - name: Run Android unit tests
         working-directory: android
@@ -297,6 +305,12 @@ jobs:
           workspaces: |
             services/helper
             plugins/rust_api/rust
+          save-if: ${{ env.BRANCH_CACHE }}
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev
 
       - name: Check format
         run: |
@@ -320,6 +334,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/helper
+          save-if: ${{ env.BRANCH_CACHE }}
 
       - name: Check format
         run: cargo fmt --manifest-path services/helper/Cargo.toml -- --check
@@ -327,20 +342,67 @@ jobs:
       - name: Run Windows service tests
         run: cargo test --manifest-path services/helper/Cargo.toml --features windows-service
 
+  version:
+    name: Version
+    # fork: releases come from this repository, and the tag has to name the
+    # imported upstream version (tool/check_fork_version.sh).
+    if: &release github.repository == 'DengLiuXing/honganclash' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .upstream-version
+            pubspec.yaml
+            tool/check_fork_version.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Check the tag names this fork's upstream snapshot
+        run: bash tool/check_fork_version.sh "${GITHUB_REF_NAME}"
+
+      # Android refuses a lower versionCode, so the clock-based build number never drops below pubspec's.
+      - name: Resolve the version from the tag
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # fork: tags are vX.Y.Z-honganBeta.0.0.N[+M]; the package version drops
+          # the suffix, as RPM and the Windows installer reject a prerelease one.
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-honganBeta(\.[0-9]+)*)?(\+[0-9]+)?$ ]]; then
+            echo "::error::$TAG is not a honganclash release tag"
+            exit 1
+          fi
+          name="${BASH_REMATCH[1]}"
+          committed="$(sed -n 's/^version: .*+\([0-9]*\)$/\1/p' pubspec.yaml)"
+          build="$(date -u +%Y%m%d%H)"
+          if ((build <= ${committed:-0})); then
+            build=$((committed + 1))
+          fi
+          echo "version=$name+$build" >> "$GITHUB_OUTPUT"
+          echo "$TAG builds $name+$build"
+
   build:
-    # Tag builds on this fork publish desktop installers.
-    if: github.repository == 'DengLiuXing/honganclash' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: *release
+    needs: version
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         include:
-          - platform: linux
-            os: ubuntu-22.04
-            arch: amd64
+          # fork: one ABI keeps the gomobile Core, the Cargo crate and the R8
+          # pass to a single run; add arm/x86_64 only if those devices matter.
+          - platform: android
+            os: ubuntu-latest
+            extra: --arch arm64
           - platform: windows
             os: Windows-2022
             arch: amd64
+          - platform: linux
+            os: ubuntu-22.04
+            arch: amd64
+          # fork: the Intel DMG stays published, so Flutter never drops this mac.
           - platform: macos
             os: macos-15-intel
             arch: amd64
@@ -354,36 +416,72 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Apply the tag's version
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          sed "s/^version: .*/version: $VERSION/" pubspec.yaml > pubspec.yaml.tmp
+          mv pubspec.yaml.tmp pubspec.yaml
+
+      # fork: the release key material lives in this repository's ANDROID_* secrets.
+      - name: Setup Android Signing
+        if: startsWith(matrix.platform,'android')
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "The ANDROID_* repository secrets are incomplete ($name is empty)." >&2
+              exit 1
+            fi
+          done
+          echo "$KEYSTORE" | base64 -d > android/app/keystore.jks
+          {
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+          } >> android/local.properties
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: ${{ env.BRANCH_CACHE }}
           cache-dependency-path: core/go.sum
 
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.platform }}-${{ matrix.arch || 'all' }}
-          workspaces: services/helper
-          cache-directories: .dart_tool/hooks_runner
+      - name: Setup Gradle
+        if: startsWith(matrix.platform,'android')
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Enable git long paths (Windows)
         if: startsWith(matrix.os, 'windows')
         run: git config --global core.longpaths true
 
-      # See .agents/flutter-upgrade.md before bumping FLUTTER_VERSION.
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+          cache: ${{ env.BRANCH_CACHE }}
 
       - name: Setup Xcode
         if: startsWith(matrix.platform,'macos')
         run: |
           sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
+
+      - name: Setup NDK
+        if: startsWith(matrix.platform,'android')
+        uses: nttld/setup-ndk@v1
+        id: build-ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: true
+          link-to-sdk: true
 
       - name: Get Flutter Dependency
         run: |
@@ -402,124 +500,19 @@ jobs:
           curl -fsSL --retry 3 -o "$bundle" "https://curl.se/ca/$CA_BUNDLE"
           echo "$CA_BUNDLE_SHA256  $bundle" | sha256sum -c -
 
-      - name: Disable Impeller on Intel macOS
-        if: matrix.platform == 'macos' && matrix.arch == 'amd64'
-        run: plutil -replace FLTEnableImpeller -bool NO macos/Runner/Info.plist
-
-      # Windows defaults to pwsh, where `${GITHUB_REF_NAME}` is an empty shell
-      # variable rather than the environment variable bash sees.
-      - name: Validate fork version
-        shell: bash
-        run: bash tool/check_fork_version.sh "${GITHUB_REF_NAME}"
-
-      # RPM and the Windows installer reject the semver prerelease suffix.
-      - name: Normalize beta package version
-        if: env.IS_BETA == 'true'
-        shell: bash
-        run: |
-          version="$(sed -n 's/^version: //p' pubspec.yaml)"
-          base="${version%%-*}"
-          build="${version##*+}"
-          sed "s/^version: .*/version: ${base}+${build}/" pubspec.yaml > pubspec.yaml.tmp
-          mv pubspec.yaml.tmp pubspec.yaml
-          grep '^version:' pubspec.yaml
-
       - name: Setup
         env:
+          ANDROID_NDK_HOME: ${{ steps.build-ndk.outputs.ndk-path }}
           # The setup hook builds the Core for the host slice only, so an x86_64 slice in the arm64 app cannot run.
           FLUTTER_MACOS_ARM64_ONLY: ${{ matrix.platform == 'macos' && matrix.arch == 'arm64' }}
-        run: dart tool/package.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
+        # `dart run` first runs every build hook for this runner, Linux GTK and the Go core included; the packager builds them for the target itself.
+        run: dart tool/package.dart ${{ matrix.platform }} ${{ matrix.extra }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
 
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifact-${{ matrix.platform }}${{ matrix.arch && format('-{0}', matrix.arch) }}
-          path: ./dist
-          overwrite: true
-
-  android-apk:
-    name: Android APK
-    if: github.repository == 'DengLiuXing/honganclash' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: core/go.sum
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      - name: Setup NDK
-        uses: nttld/setup-ndk@v1
-        id: ndk
-        with:
-          ndk-version: ${{ env.NDK_VERSION }}
-          link-to-sdk: true
-
-      # android/app/build.gradle.kts reads the key material at configure time, so
-      # both files have to exist before the first Gradle invocation tool/package.dart makes.
-      - name: Write signing config
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # fork: a build that lost the signing config still produces an APK; it just
+      # carries the .dev applicationId, so the package name is the check.
+      - name: Check the APK is release-signed
+        if: startsWith(matrix.platform,'android')
         run: |
-          for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            if [ -z "${!name:-}" ]; then
-              echo "The ANDROID_* repository secrets are incomplete ($name is empty)." >&2
-              exit 1
-            fi
-          done
-          echo "$KEYSTORE" | base64 -d > android/app/keystore.jks
-          {
-            echo "flutter.sdk=$FLUTTER_ROOT"
-            echo "sdk.dir=$ANDROID_HOME"
-            echo "storePassword=$STORE_PASSWORD"
-            echo "keyAlias=$KEY_ALIAS"
-            echo "keyPassword=$KEY_PASSWORD"
-          } > android/local.properties
-
-      - name: Validate fork version
-        shell: bash
-        run: bash tool/check_fork_version.sh "${GITHUB_REF_NAME}"
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      # One ABI keeps the gomobile Core, the Cargo crate and the R8 pass to a
-      # single run; add arm/x86_64 here only if those devices matter.
-      - name: Build APK
-        env:
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: dart tool/package.dart android --arch arm64 ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
-
-      # A build that lost the release signing config still produces an APK; it
-      # just carries the .dev applicationId, so the package name is the check.
-      - name: Check the artifacts
-        run: |
-          ls -lh dist
           apk="$(find dist -maxdepth 1 -name '*.apk' -print -quit)"
           test -n "$apk" || { echo 'No APK in dist/' >&2; exit 1; }
           aapt2="$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort -V | tail -1)"
@@ -530,39 +523,27 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: artifact-android
+          name: artifact-${{ matrix.platform }}${{ matrix.arch && format('-{0}', matrix.arch) }}
           path: ./dist
           overwrite: true
 
   upload:
     permissions:
       contents: write
-    needs: [ build, android-apk ]
-    # A failed APK must not hold back the desktop installers that are ready to
-    # publish; the failed run already shows up on its own.
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    needs: [ version, build, dart, plugins, go, android, rust, windows-helper-test ]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: true
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      # The merge reads the manifests alone, so the native hooks must not rebuild
-      # the Core on this runner.
-      - name: Skip native build hooks
+      - name: Apply the tag's version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+          sed -i "s/^version: .*/version: $VERSION/" pubspec.yaml
 
       - name: Download
         uses: actions/download-artifact@v4
@@ -570,14 +551,27 @@ jobs:
           path: ./artifacts/
           pattern: artifact-*
 
-      # Each platform job writes its own manifest.json; merging keeps one
-      # canonical version, checksums file and lookup table in dist/.
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: ${{ env.BRANCH_CACHE }}
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Skip native build hooks
+        run: |
+          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+
       - name: Merge the build manifests
         run: dart run tool/package.dart merge artifacts/* --out dist
 
       - name: Check every file the release is looked up by
         run: dart run tool/package.dart check dist
 
+      # fork: a honganBeta tag publishes too; upstream only releases stable tags.
       - name: Release
         if: ${{ env.IS_STABLE == 'true' || env.IS_BETA == 'true' }}
         uses: softprops/action-gh-release@v2

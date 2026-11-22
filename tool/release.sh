@@ -225,8 +225,8 @@ if [[ "$mode" == "stable" ]]; then
   git commit -m "chore(release): v$version"
   committed=1
 elif ! git diff --quiet -- pubspec.yaml; then
-  # The fork build takes its build number from pubspec.yaml, so a prerelease
-  # commits the bump tool/bump_version.sh wrote above.
+  # CI raises its clock-based build number above the committed one, so this bump
+  # only keeps pubspec moving; committing it keeps the working tree clean.
   git add pubspec.yaml
   git commit -m "chore: bump version to $(sed -n 's/^version: //p' pubspec.yaml)"
   committed=1
