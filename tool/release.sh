@@ -224,6 +224,12 @@ if [[ "$mode" == "stable" ]]; then
   git add CHANGELOG.md changelog.json pubspec.yaml
   git commit -m "chore(release): v$version"
   committed=1
+elif ! git diff --quiet -- pubspec.yaml; then
+  # The fork build takes its build number from pubspec.yaml, so a prerelease
+  # commits the bump tool/bump_version.sh wrote above.
+  git add pubspec.yaml
+  git commit -m "chore: bump version to $(sed -n 's/^version: //p' pubspec.yaml)"
+  committed=1
 fi
 
 git tag "$tag"

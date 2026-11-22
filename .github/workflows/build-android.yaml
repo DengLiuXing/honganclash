@@ -13,7 +13,7 @@ on:
           - all
         default: arm64
       app_env:
-        description: APP_ENV used by setup.dart
+        description: APP_ENV used by tool/package.dart
         type: choice
         options:
           - pre
@@ -27,7 +27,7 @@ permissions:
   contents: write
 
 env:
-  FLUTTER_VERSION: '3.47.6'
+  FLUTTER_VERSION: '3.50.0'
   GO_VERSION: '1.27.1'
   NDK_VERSION: r28c
   ARCH: ${{ github.event.inputs.arch || 'arm64' }}
@@ -74,7 +74,7 @@ jobs:
           link-to-sdk: true
 
       # android/app/build.gradle.kts reads the key material at configure time, so
-      # both files have to exist before the first Gradle invocation setup.dart makes.
+      # both files have to exist before the first Gradle invocation tool/package.dart makes.
       - name: Write signing config
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -108,7 +108,7 @@ jobs:
           if [ "$ARCH" != all ]; then
             args+=(--arch "$ARCH")
           fi
-          dart setup.dart android "${args[@]}" --env "$APP_ENV" -v
+          dart tool/package.dart android "${args[@]}" --env "$APP_ENV" -v
 
       # A build that lost the release signing config still produces an APK; it
       # just carries the .dev applicationId, so the package name is the check.

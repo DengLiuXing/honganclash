@@ -119,7 +119,7 @@ flutter pub get
 flutter run -d linux            # 建议第一次加 --dart-define=SAFE_MODE=true，先不改系统 TUN/代理
 
 # 4) 打包
-dart setup.dart linux
+dart tool/package.dart linux
 ```
 
 > `core/Clash.Meta/` 是子模块，分支是 `FlClash`。若 `git submodule update --init --recursive` 拉不到，用：

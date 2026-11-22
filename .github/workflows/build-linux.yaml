@@ -13,7 +13,7 @@ on:
           - rpm
         default: deb,appimage,rpm
       app_env:
-        description: APP_ENV used by setup.dart
+        description: APP_ENV used by tool/package.dart
         type: choice
         options:
           - pre
@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 env:
-  FLUTTER_VERSION: '3.47.6'
+  FLUTTER_VERSION: '3.50.0'
   GO_VERSION: '1.27.1'
 
 jobs:
@@ -68,8 +68,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
-            libayatana-appindicator3-dev libsecret-1-dev \
-            rpm patchelf libfuse2 locate
+            libsecret-1-dev rpm patchelf libfuse2 locate
 
       - name: Get Flutter dependencies
         run: flutter pub get
@@ -79,16 +78,17 @@ jobs:
 
       - name: Build packages
         run: >-
-          dart setup.dart linux
+          dart tool/package.dart linux
           --targets "$TARGETS"
           --env "$APP_ENV"
           -v
 
-      - name: Write checksums
+      # The packager writes its own checksums; this checks every file the
+      # manifest lists is present and hashed.
+      - name: Check the artifacts
         run: |
           ls -lh dist
-          test -n "$(find dist -maxdepth 1 -type f -print -quit)"
-          cd dist && sha256sum ./* > SHA256SUMS
+          dart run tool/package.dart check dist
 
       - name: Upload
         uses: actions/upload-artifact@v4

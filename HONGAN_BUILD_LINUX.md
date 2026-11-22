@@ -150,7 +150,7 @@ flutter run -d linux
 flutter run -d linux --dart-define=SAFE_MODE=true
 
 # 生成正式产物
-dart setup.dart linux
+dart tool/package.dart linux
 ```
 
 构建 Hook 的日志在 `.dart_tool/setup_build_cache/hook.log`；强制重建内核/Helper：
@@ -162,7 +162,7 @@ rm -rf .dart_tool/setup_build_cache
 ### 与 CI 一致的检查
 
 ```bash
-dart format --output=none --set-exit-if-changed lib test tool plugins setup.dart
+dart format --output=none --set-exit-if-changed lib test tool plugins
 flutter analyze --no-fatal-infos
 dart run tool/test.dart
 ```
