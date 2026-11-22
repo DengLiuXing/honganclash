@@ -91,7 +91,7 @@ sudo rpm -i FlClash-*.rpm
 - `build-linux` 的 runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版。
 - 构建产物没有签名；deb/rpm 的包名仍是上游的 `FlClash`，会和已安装的 FlClash 冲突，安装前先卸载，或直接用 AppImage。
 - 子模块 `core/Clash.Meta/` 之前没有作为 gitlink 提交，GitHub runner checkout 后会是空目录；本仓库已补上与上游
-  `v0.9.2` 一致的 `c506292` 指针。
+  `v0.9.4` 一致的 `5b453f8` 指针。
 
 ### 发布桌面 release（Linux / Windows / macOS）
 
