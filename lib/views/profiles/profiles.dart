@@ -28,10 +28,6 @@ double get _profileItemHeight {
       2 * listRowVerticalPadding;
 }
 
-/// A HongAn profile refreshes from the panel, not from its subscription URL.
-bool _isHonganProfile(Profile profile) =>
-    preferences.honganAccounts.containsKey(profile.id);
-
 class ProfilesView extends ConsumerStatefulWidget {
   const ProfilesView({super.key, this.picker = false});
 
@@ -54,14 +50,13 @@ class _ProfilesViewState extends ConsumerState<ProfilesView> {
     final profilesAction = ref.read(profilesActionProvider.notifier);
     final List<UpdatingMessage> messages = [];
     final updateProfiles = profiles.map<Future>((profile) async {
-      final isHongan = _isHonganProfile(profile);
-      if (!isHongan && profile.type != ProfileType.url) return;
+      // A HongAn profile refreshes from the panel, not from a subscription URL.
+      if (profile.type != ProfileType.url &&
+          !preferences.hasHonganAccount(profile.id)) {
+        return;
+      }
       try {
-        if (isHongan) {
-          await profilesAction.syncHonganProfile(profile, showLoading: true);
-        } else {
-          await profilesAction.updateProfile(profile, showLoading: true);
-        }
+        await profilesAction.updateProfile(profile, showLoading: true);
       } catch (e) {
         messages.add(
           UpdatingMessage(
@@ -351,15 +346,14 @@ class ProfileItem extends ConsumerWidget {
   }
 
   Future updateProfile(WidgetRef ref) async {
-    final isHongan = _isHonganProfile(profile);
-    if (!isHongan && profile.type != ProfileType.url) return;
+    if (profile.type != ProfileType.url &&
+        !preferences.hasHonganAccount(profile.id)) {
+      return;
+    }
     await globalState.loadingRun(() async {
-      final profilesAction = ref.read(profilesActionProvider.notifier);
-      if (isHongan) {
-        await profilesAction.syncHonganProfile(profile, showLoading: true);
-      } else {
-        await profilesAction.updateProfile(profile, showLoading: true);
-      }
+      await ref
+          .read(profilesActionProvider.notifier)
+          .updateProfile(profile, showLoading: true);
     }, tag: LoadingTag.profiles);
   }
 
@@ -370,7 +364,10 @@ class ProfileItem extends ConsumerWidget {
     );
   }
 
-  SubscriptionInfo? get _subscriptionInfo => profile.subscriptionInfo;
+  SubscriptionInfo? get _subscriptionInfo =>
+      profile.type == ProfileType.url || preferences.hasHonganAccount(profile.id)
+      ? profile.subscriptionInfo
+      : null;
 
   String _subtitle(BuildContext context) {
     final info = _subscriptionInfo;
@@ -482,7 +479,7 @@ class ProfileItem extends ConsumerWidget {
             _handlePushGenProfilePage(context, profile.id);
           },
         ),
-      if (isUrl || _isHonganProfile(profile))
+      if (isUrl || preferences.hasHonganAccount(profile.id))
         PopupMenuItem(
           glyph: AppGlyphs.sync,
           label: appLocalizations.sync,

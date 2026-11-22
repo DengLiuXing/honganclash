@@ -177,6 +177,15 @@ void main() {
         expire: 1234567890,
       ),
     );
+    preferences.debugSetHonganAccounts({
+      file.id: const HonganAccount(
+        email: 'hongan@example.com',
+        jwt: 'jwt',
+        subscriptionToken: 'token',
+        uuid: 'uuid',
+      ),
+    });
+    addTearDown(() => preferences.debugSetHonganAccounts(const {}));
     await pumpProfiles(tester, profiles: [file]);
 
     expect(find.text('3KB / 4KB'), findsOneWidget);

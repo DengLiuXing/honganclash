@@ -162,6 +162,9 @@ class ProfilesAction extends _$ProfilesAction {
     Profile profile, {
     bool showLoading = false,
   }) async {
+    if (preferences.hasHonganAccount(profile.id)) {
+      return _syncHonganProfile(profile, showLoading: showLoading);
+    }
     final operation = showLoading
         ? ref.read(updatingKeysProvider.notifier).start(profile.updatingKey)
         : null;
@@ -214,7 +217,7 @@ class ProfilesAction extends _$ProfilesAction {
 
   /// Rebuilds [profile] from the panel with the credentials it kept, instead
   /// of downloading its subscription URL.
-  Future<void> syncHonganProfile(
+  Future<void> _syncHonganProfile(
     Profile profile, {
     bool showLoading = false,
   }) async {

@@ -192,6 +192,14 @@ class Preferences {
 
   Map<int, HonganAccount> get honganAccounts => _honganAccounts;
 
+  bool hasHonganAccount(int profileId) =>
+      _honganAccounts.containsKey(profileId);
+
+  @visibleForTesting
+  void debugSetHonganAccounts(Map<int, HonganAccount> accounts) {
+    _honganAccounts = accounts;
+  }
+
   Future<void> loadHonganAccounts() async {
     final sharedPreferencesIns = await _store.value;
     _honganAccounts = _decodeHonganAccounts(
