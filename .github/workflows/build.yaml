@@ -389,6 +389,7 @@ jobs:
     needs: version
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: android
@@ -516,6 +517,7 @@ jobs:
           echo "$CA_BUNDLE_SHA256  $bundle" | sha256sum -c -
 
       - name: Setup
+        shell: bash
         env:
           ANDROID_NDK_HOME: ${{ steps.build-ndk.outputs.ndk-path }}
           # The setup hook builds the Core for the host slice only, so an x86_64 slice in the arm64 app cannot run.
