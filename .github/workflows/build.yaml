@@ -81,17 +81,8 @@ jobs:
         continue-on-error: true
         run: dart run tool/changelog.dart verify
 
-      # fork: temporary — echoes failing cases as annotations, for runs whose log
-      # cannot be downloaded.
       - name: Run tests
-        run: |
-          set +e
-          dart run tool/test.dart -- --reporter expanded --coverage 2>&1 | tee test.log
-          status=${PIPESTATUS[0]}
-          if ((status)); then
-            grep -E '\[E\]' test.log | head -30 | sed 's/^/::error::/' || true
-          fi
-          exit "$status"
+        run: dart run tool/test.dart -- --reporter expanded --coverage
 
       - name: Check coverage
         run: dart run tool/check_coverage.dart coverage/lcov.info 75
@@ -400,26 +391,39 @@ jobs:
     strategy:
       matrix:
         include:
-          # fork: one ABI keeps the gomobile Core, the Cargo crate and the R8
-          # pass to a single run; add arm/x86_64 only if those devices matter.
           - platform: android
             os: ubuntu-latest
-            extra: --arch arm64
           - platform: windows
             os: Windows-2022
             arch: amd64
           - platform: linux
             os: ubuntu-22.04
             arch: amd64
-          # fork: the Intel DMG stays published, so Flutter never drops this mac.
           - platform: macos
             os: macos-15-intel
             arch: amd64
           - platform: macos
             os: macos-latest
             arch: arm64
+          - platform: windows
+            os: windows-11-arm
+            arch: arm64
+            flutter-channel: master
+          - platform: linux
+            os: ubuntu-24.04-arm
+            arch: arm64
+            flutter-channel: master
 
     steps:
+      - name: Setup rust
+        if: startsWith(matrix.os, 'windows-11-arm')
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://win.rustup.rs/aarch64" -OutFile rustup-init.exe
+          .\rustup-init.exe -y --default-toolchain stable
+          $cargoPath = "$env:USERPROFILE\.cargo\bin"
+          Add-Content $env:GITHUB_PATH $cargoPath
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -470,10 +474,12 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: git config --global core.longpaths true
 
+      # Stable publishes no Windows or Linux arm64 archive; master makes the action
+      # clone the SDK at the pinned tag and let it fetch the host's own Dart SDK.
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          channel: ${{ matrix.flutter-channel || 'stable' }}
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: ${{ env.BRANCH_CACHE }}
 
@@ -515,7 +521,7 @@ jobs:
           # The setup hook builds the Core for the host slice only, so an x86_64 slice in the arm64 app cannot run.
           FLUTTER_MACOS_ARM64_ONLY: ${{ matrix.platform == 'macos' && matrix.arch == 'arm64' }}
         # `dart run` first runs every build hook for this runner, Linux GTK and the Go core included; the packager builds them for the target itself.
-        run: dart tool/package.dart ${{ matrix.platform }} ${{ matrix.extra }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
+        run: dart tool/package.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
 
       # fork: a build that lost the signing config still produces an APK; it just
       # carries the .dev applicationId, so the package name is the check.
