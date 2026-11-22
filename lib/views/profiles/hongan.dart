@@ -4,7 +4,6 @@ import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:material_ui/material_ui.dart';
 
 /// Signs in to the HongAn (红岸) panel and returns what the panel issues, or
 /// null when the user cancels.
@@ -78,8 +77,9 @@ class _HonganImportDialogState extends State<_HonganImportDialog> {
   @override
   Widget build(BuildContext context) {
     final appLocalizations = context.appLocalizations;
-    return CommonDialog(
+    return AlertDialog(
       title: '红岸账号导入',
+      hasFields: true,
       actions: [
         TextButton(
           onPressed: _loading
@@ -113,7 +113,7 @@ class _HonganImportDialogState extends State<_HonganImportDialog> {
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
             onSubmitted: (_) => _passwordFocusNode.requestFocus(),
-            decoration: const InputDecoration(labelText: '邮箱'),
+            decoration: const InputDecoration(hintText: '邮箱'),
           ),
           const SizedBox(height: 8),
           SecretTextFormField(
@@ -123,7 +123,7 @@ class _HonganImportDialogState extends State<_HonganImportDialog> {
             onFieldSubmitted: (_) {
               unawaited(_handleSubmit());
             },
-            decoration: const InputDecoration(labelText: '密码'),
+            decoration: const InputDecoration(hintText: '密码'),
           ),
           if (_error != null)
             Padding(
