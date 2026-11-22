@@ -60,22 +60,21 @@ git clone --depth 1 -b FlClash https://github.com/chen08209/Clash.Meta.git core/
 
 ## 3. 在 GitHub 上构建（不用本机工具链）
 
-仓库里有两个 workflow：
+仓库只有一个发布 workflow `.github/workflows/build.yaml`：
 
-- `.github/workflows/build.yaml`：推 `v*` tag 时构建 **Linux / Windows / macOS** 桌面安装包并发布 GitHub Release；
-  同一 workflow 的 `desktop` job 还会在每次 push 时做各平台的 debug 编译检查。
-- `.github/workflows/build-linux.yaml`：只手动构建 Linux 包，产物作为 Actions artifact，不发 Release。
+- 推 `v*` tag 时构建 **Android / Linux / Windows / macOS** 全部产物并发布 GitHub Release（prerelease）；
+- **手动触发**（Actions → build → Run workflow）只打包、把产物留在本次运行的 artifact 里，不发 Release、不打 tag。
+  这是验证打包的正确入口，避免为了试错去推 tag。
+- `desktop` job 在每次分支 push 时做各平台的 debug 编译检查。
 
-两个 workflow 都会在云端编译 Go 内核、Rust Helper 和 Flutter，本机只要有浏览器。
+它会在云端编译 Go 内核、Rust Helper 和 Flutter，本机只要有浏览器。
 
-### 手动构建 Linux 包
+### 手动构建（不发 Release）
 
 1. 把仓库推到 GitHub，确认 `core/Clash.Meta` 的子模块指针在；如果是 fork，先在 **Actions** 页启用 workflow。
-2. 打开 **Actions → build-linux → Run workflow**：
-   - `targets` 默认 `deb,appimage,rpm`，也可以只选一个；
-   - `app_env` 手动构建默认 `pre`。
-3. 等 20–60 分钟（首次没有缓存时更久）。成功后在该次运行页面底部下载
-   `honganclash-linux-amd64.zip`。
+2. 打开 **Actions → build → Run workflow**（分支选 `main`）。
+3. 等 30–90 分钟（七个平台并行，首次没有缓存时更久）。成功后在该次运行页面底部下载
+   `artifact-*`，其中有 `FlClash-<版本>-linux-amd64.deb` 等安装包。
 4. 解压后直接用：
 
 ```bash
@@ -88,7 +87,7 @@ sudo rpm -i FlClash-*.rpm
 
 说明与限制：
 
-- `build-linux` 的 runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版。
+- Linux 的 runner 固定 `ubuntu-22.04`（glibc 2.35），产物面向 22.04 及更新的发行版。
 - 构建产物没有签名；deb/rpm 的包名仍是上游的 `FlClash`，会和已安装的 FlClash 冲突，安装前先卸载，或直接用 AppImage。
 - 子模块 `core/Clash.Meta/` 之前没有作为 gitlink 提交，GitHub runner checkout 后会是空目录；本仓库已补上与上游
   `v0.9.4` 一致的 `5b453f8` 指针。

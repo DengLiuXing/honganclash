@@ -345,8 +345,10 @@ jobs:
   version:
     name: Version
     # fork: releases come from this repository, and the tag has to name the
-    # imported upstream version (tool/check_fork_version.sh).
-    if: &release github.repository == 'DengLiuXing/honganclash' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # imported upstream version (tool/check_fork_version.sh). A manual run
+    # packages what pubspec.yaml names and publishes nothing, so packaging can
+    # be checked before a tag exists.
+    if: &release github.repository == 'DengLiuXing/honganclash' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
@@ -361,6 +363,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Check the tag names this fork's upstream snapshot
+        if: github.ref_type == 'tag'
         run: bash tool/check_fork_version.sh "${GITHUB_REF_NAME}"
 
       # Android refuses a lower versionCode, so the clock-based build number never drops below pubspec's.
@@ -369,6 +372,13 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          # fork: a manual run has no tag, so it packages the pubspec version as is.
+          if [[ "$GITHUB_REF_TYPE" != 'tag' ]]; then
+            full="$(sed -n 's/^version: //p' pubspec.yaml)"
+            echo "version=${full%%-*}+${full##*+}" >> "$GITHUB_OUTPUT"
+            echo "manual run builds ${full%%-*}+${full##*+}"
+            exit 0
+          fi
           # fork: tags are vX.Y.Z-honganBeta.0.0.N[+M]; the package version drops
           # the suffix, as RPM and the Windows installer reject a prerelease one.
           if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-honganBeta(\.[0-9]+)*)?(\+[0-9]+)?$ ]]; then
@@ -389,7 +399,6 @@ jobs:
     needs: version
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
         include:
           - platform: android
@@ -517,21 +526,12 @@ jobs:
           echo "$CA_BUNDLE_SHA256  $bundle" | sha256sum -c -
 
       - name: Setup
-        shell: bash
         env:
           ANDROID_NDK_HOME: ${{ steps.build-ndk.outputs.ndk-path }}
           # The setup hook builds the Core for the host slice only, so an x86_64 slice in the arm64 app cannot run.
           FLUTTER_MACOS_ARM64_ONLY: ${{ matrix.platform == 'macos' && matrix.arch == 'arm64' }}
         # `dart run` first runs every build hook for this runner, Linux GTK and the Go core included; the packager builds them for the target itself.
-        run: |
-          set +e
-          dart tool/package.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v 2>&1 | tee package.log
-          status=${PIPESTATUS[0]}
-          if ((status)); then
-            grep -nE 'Error|error:|FAILURE|What went wrong|Exception|not found' package.log |
-              tail -25 | sed 's/^/::error::/'
-          fi
-          exit "$status"
+        run: dart tool/package.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
 
       # fork: a build that lost the signing config still produces an APK; it just
       # carries the .dev applicationId, so the package name is the check.
@@ -593,12 +593,38 @@ jobs:
       - name: Merge the build manifests
         run: dart run tool/package.dart merge artifacts/* --out dist
 
+      # fork: rendered notes are upstream's stable-release wording; a honganBeta
+      # tag skips them and publishes the plain body below instead.
+      - name: Generate release notes
+        if: ${{ env.IS_STABLE == 'true' }}
+        shell: bash
+        env:
+          IS_STABLE: ${{ env.IS_STABLE }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          target=()
+          if [[ "$IS_STABLE" == 'true' ]]; then
+            target=(--tag "$TAG")
+          else
+            dart run tool/changelog.dart build --unreleased
+          fi
+          dart run tool/changelog.dart render release "${target[@]}" --out release.md
+          dart run tool/changelog.dart render telegram "${target[@]}" --out telegram.md
+
+      - name: Patch release.md
+        if: ${{ env.IS_STABLE == 'true' }}
+        run: |
+          version=$(jq -r '.artifacts[0].version' dist/manifest.json)
+          sed -e "s|TAG|${{ github.ref_name }}|g" -e "s|VERSION|$version|g" \
+            ./.github/release_template.md >> release.md
+
       - name: Check every file the release is looked up by
         run: dart run tool/package.dart check dist
 
       # fork: a honganBeta tag publishes too; upstream only releases stable tags.
+      # A manual run stops before this, so its artifacts stay in the run.
       - name: Release
-        if: ${{ env.IS_STABLE == 'true' || env.IS_BETA == 'true' }}
+        if: ${{ github.event_name == 'push' && (env.IS_STABLE == 'true' || env.IS_BETA == 'true') }}
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ env.IS_BETA == 'true' }}
@@ -608,3 +634,57 @@ jobs:
 
             Desktop builds: Linux, Windows and macOS.
             Android: arm64 APK, signed with the fork's release key.
+
+      - name: Create Homebrew Cask Source Dir
+        if: ${{ env.IS_STABLE == 'true' }}
+        run: |
+          dmg() {
+            jq -er --arg arch "$1" '.artifacts[] | select(.os == "macos" and .arch == $arch)' dist/manifest.json
+          }
+          version=$(dmg arm64 | jq -r .version)
+          arm_sha=$(dmg arm64 | jq -r .sha256)
+          amd_sha=$(dmg amd64 | jq -r .sha256)
+
+          mkdir -p ./brew/Casks
+          sed \
+            -e "s|VERSION|$version|g" \
+            -e "s|ARM_SHA256|$arm_sha|g" \
+            -e "s|AMD_SHA256|$amd_sha|g" \
+            ./.github/homebrew_cask_template.rb > ./brew/Casks/flclash.rb
+
+      - name: Push to Homebrew tap
+        if: ${{ env.IS_STABLE == 'true' }}
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.HOMEBREW_SSH_DEPLOY_KEY }}
+        with:
+          source-directory: ./brew/
+          destination-github-username: chen08209
+          destination-repository-name: homebrew-tap
+          user-name: 'chen08029'
+          user-email: 'chen08209@gmail.com'
+          target-branch: main
+          commit-message: Update Homebrew cask from ${{ github.ref_name }}
+          target-directory: /
+
+      - name: Create Fdroid Source Dir
+        if: ${{ env.IS_STABLE == 'true' }}
+        run: |
+          mkdir -p ./tmp
+          apk=$(jq -er '.artifacts[] | select(.os == "android" and .arch == "arm64") | .name' dist/manifest.json)
+          cp "./dist/$apk" ./tmp/
+
+      - name: Push to fdroid repo
+        if: ${{ env.IS_STABLE == 'true' }}
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        with:
+          source-directory: ./tmp/
+          destination-github-username: chen08209
+          destination-repository-name: FlClash-fdroid-repo
+          user-name: 'chen08029'
+          user-email: 'chen08209@gmail.com'
+          target-branch: main
+          commit-message: Update from ${{ github.ref_name }}
+          target-directory: /tmp/
