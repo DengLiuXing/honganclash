@@ -81,8 +81,17 @@ jobs:
         continue-on-error: true
         run: dart run tool/changelog.dart verify
 
+      # fork: temporary — echoes failing cases as annotations, for runs whose log
+      # cannot be downloaded.
       - name: Run tests
-        run: dart run tool/test.dart -- --reporter expanded --coverage
+        run: |
+          set +e
+          dart run tool/test.dart -- --reporter expanded --coverage 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          if ((status)); then
+            grep -E '\[E\]' test.log | head -30 | sed 's/^/::error::/' || true
+          fi
+          exit "$status"
 
       - name: Check coverage
         run: dart run tool/check_coverage.dart coverage/lcov.info 75
