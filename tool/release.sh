@@ -7,7 +7,9 @@ cd "$root"
 
 mode=""
 want_version=""
+rebuild=0
 do_push=0
+remote=origin
 assume_yes=0
 dry_run=0
 
@@ -15,20 +17,29 @@ usage() {
   cat <<'EOF'
 Usage: tool/release.sh <pre|stable> [options]
 
-  pre                Tag the next vX.Y.Z-honganBeta.0.0.N prerelease.
-  stable             Write the changelog, commit it, and tag vX.Y.Z-honganBeta.
+  pre                Tag the next vX.Y.Z-honganBeta.0.0.N prerelease on HEAD,
+                     no commit.
+  stable             Write the changelog, pause for edits, commit it, and
+                     tag vX.Y.Z-honganBeta.
+
+The app version tracks the imported upstream snapshot in .upstream-version, so
+--version must equal it; the fork build takes the build number from
+pubspec.yaml, which tool/bump_version.sh advances on every release.
 
 Options:
-  --version X.Y.Z    Target app version. Defaults to the pubspec version, and
-                     must match .upstream-version.
+  --version X.Y.Z    Target app version. Must equal .upstream-version.
+  --rebuild          With pre: tag vX.Y.Z-honganBeta.0.0.N+M, rebuilding the
+                     newest prerelease N instead of starting N+1.
   --push             Push the branch and the tag once the local steps pass.
-  --yes              Skip the confirmation prompt.
+  --remote NAME      Remote to push to (default origin).
+  --yes              Skip the confirmation prompt and the changelog pause.
   --dry-run          Report the plan and exit without changing anything.
   -h, --help         Show this help.
 
 Examples:
-  tool/release.sh pre --push          # v0.9.2-honganBeta.0.0.3, notes rendered by CI
-  tool/release.sh stable --push       # v0.9.2-honganBeta with a release commit
+  tool/release.sh pre --push            # v0.9.4-honganBeta.0.0.2
+  tool/release.sh pre --rebuild --push  # v0.9.4-honganBeta.0.0.2+1 after a fix
+  tool/release.sh stable --push         # v0.9.4-honganBeta
 EOF
 }
 
@@ -48,7 +59,13 @@ while (($#)); do
       want_version="$1"
       ;;
     --version=*) want_version="${1#*=}" ;;
+    --rebuild) rebuild=1 ;;
     --push) do_push=1 ;;
+    --remote)
+      shift || die "--remote needs a value"
+      remote="$1"
+      ;;
+    --remote=*) remote="${1#*=}" ;;
     --yes | -y) assume_yes=1 ;;
     --dry-run) dry_run=1 ;;
     -h | --help)
@@ -90,39 +107,51 @@ fi
 current="$(pubspec_version)"
 [[ -n "$current" ]] || die "could not read the version from pubspec.yaml"
 
-# The app version tracks the imported upstream snapshot, and the release build
-# rejects any tag whose version differs from it, so a release starts by bumping
-# .upstream-version (see tool/fork_version.sh) rather than this script.
+bumped=0
 upstream="$(tr -d '[:space:]' <"$root/.upstream-version")"
 version="${want_version:-$current}"
 [[ "$version" == "$upstream" ]] ||
   die "app version $version must equal .upstream-version ($upstream); tool/check_fork_version.sh would reject the tag"
 
 base="v$version-honganBeta"
-if [[ "$mode" == "pre" ]]; then
+if [[ "$mode" != "stable" ]]; then
   # The beta counter is three-part and only its last number moves, so the first
   # prerelease of a series is .0.0.2 and the ones after it .0.0.3, .0.0.4, ...
-  last="$(git tag --list "$base.[0-9]*.[0-9]*.[0-9]*" |
-    sed -n 's/.*\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)"
-  tag="$base.0.0.$(((${last:-1}) + 1))"
+  last="$(git tag --list "$base.0.0.*" |
+    sed -n "s/^$base\.0\.0\.\([0-9]*\)\(+[0-9]*\)\{0,1\}$/\1/p" | sort -n | tail -1)"
+  if ((rebuild)); then
+    [[ -n "$last" ]] || die "no $base.0.0.N to rebuild; run without --rebuild first"
+    builds="$(git tag --list "$base.0.0.$last+*" |
+      sed -n "s/^$base\.0\.0\.$last+\([0-9]*\)$/\1/p" | sort -n | tail -1)"
+    tag="$base.0.0.$last+$(((${builds:-0}) + 1))"
+  else
+    tag="$base.0.0.$(((${last:-1}) + 1))"
+  fi
 else
+  ((rebuild == 0)) || die "--rebuild only applies to pre"
   git rev-parse -q --verify "refs/tags/$base" >/dev/null &&
     die "$base is already tagged; bump .upstream-version for a new release"
   tag="$base"
 fi
 
+rewritten=""
+if ((bumped)) && [[ "$mode" == "stable" ]]; then
+  rewritten=' (pubspec will be rewritten)'
+fi
+
 echo
 echo "mode      : $mode"
 echo "branch    : $branch"
-echo "version   : $version"
+echo "version   : $current -> $version$rewritten"
 echo "tag       : $tag"
-if [[ "$mode" == "pre" ]]; then
+if [[ "$mode" != "stable" ]]; then
   echo "changelog : rendered by CI from build --unreleased; nothing committed"
+  echo "publishes : build artifacts + Telegram only, no GitHub release"
 else
   echo "changelog : CHANGELOG.md + changelog.json regenerated and committed"
+  echo "publishes : GitHub release with artifacts, SHA256SUMS, Homebrew cask"
 fi
-echo "publishes : GitHub prerelease with artifacts and SHA256SUMS"
-echo "push      : $([[ $do_push == 1 ]] && echo yes || echo 'no (printed at the end)')"
+echo "push      : $([[ $do_push == 1 ]] && echo "yes, to $remote" || echo 'no (printed at the end)')"
 echo
 
 committed=0
@@ -132,6 +161,10 @@ restore() {
 }
 trap restore EXIT
 
+if ((bumped)); then
+  sed -i.bak "s/^version: [0-9]*\.[0-9]*\.[0-9]*/version: $version/" pubspec.yaml
+  rm -f pubspec.yaml.bak
+fi
 tool/bump_version.sh minor
 
 echo "--- release notes for $tag ---"
@@ -170,18 +203,26 @@ fi
 
 if [[ "$mode" == "stable" ]]; then
   dart run tool/changelog.dart release --version "$version"
+  if ((assume_yes == 0)); then
+    echo
+    echo "changelog.json now holds the $tag notes. Edit their wording, merge"
+    echo "entries with \"merges\" or leave commits out with \"omit\" (see"
+    echo ".agents/commands.md), then press Enter; Ctrl-C undoes the release."
+    while true; do
+      read -r <"/dev/tty" || die "no answer read; pass --yes to run unattended"
+      dart run tool/changelog.dart markdown &&
+        dart run tool/changelog.dart verify &&
+        break
+      echo "Fix changelog.json, then press Enter again; Ctrl-C undoes the release."
+    done
+  else
+    dart run tool/changelog.dart verify
+  fi
   echo
   git --no-pager diff --stat -- CHANGELOG.md changelog.json pubspec.yaml
   echo
   git add CHANGELOG.md changelog.json pubspec.yaml
   git commit -m "chore(release): v$version"
-  committed=1
-  dart run tool/changelog.dart verify
-elif ! git diff --quiet -- pubspec.yaml; then
-  git add pubspec.yaml
-  git commit -m "chore: bump version to $(sed -n 's/^version: //p' pubspec.yaml)"
-  committed=1
-else
   committed=1
 fi
 
@@ -189,11 +230,11 @@ git tag "$tag"
 echo "tagged $tag at $(git rev-parse --short HEAD)"
 
 if ((do_push)); then
-  git push origin "$branch"
-  git push origin "$tag"
-  echo "pushed $branch and $tag"
+  git push "$remote" "$branch"
+  git push "$remote" "$tag"
+  echo "pushed $branch and $tag to $remote"
 else
   echo
   echo "Nothing was pushed. To publish:"
-  echo "  git push origin $branch && git push origin $tag"
+  echo "  git push $remote $branch && git push $remote $tag"
 fi
